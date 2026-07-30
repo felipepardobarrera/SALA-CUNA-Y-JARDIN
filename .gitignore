@@ -1,0 +1,23 @@
+# Datos reales generados por la aplicacion
+data/*.json
+!data/control-presupuestario.example.json
+
+# Configuracion local
+.env
+*.local
+
+# Dependencias y caches
+node_modules/
+__pycache__/
+*.pyc
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Respaldos exportados
+*.csv
+*.xlsx
+*.xls
+*.pdf

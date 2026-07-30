@@ -1,0 +1,14 @@
+{
+  "name": "control-presupuestario-sala-cuna-jardin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema web interno para seguimiento, proyeccion y control presupuestario de sala cuna, jardin infantil y monto directo.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

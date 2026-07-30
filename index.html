@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Control presupuestario sala cuna y jardín</title>
+    <link rel="stylesheet" href="styles.css?v=20260715-19" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">CP</div>
+          <div>
+            <p class="eyebrow">Control 2026</p>
+            <h1>Sala cuna y jardín</h1>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="Secciones">
+          <a href="#panel" class="active">Panel</a>
+          <a href="#presupuesto-base">Presupuesto base</a>
+          <a href="#proveedores">Proveedores</a>
+          <a href="#control-proveedores">Control proveedores</a>
+          <a href="#documentos">Documentos</a>
+          <a href="#registro">Registro</a>
+          <a href="#proyeccion">Proyección</a>
+          <a href="#detalle">Detalle</a>
+          <a href="#presentacion">Informe</a>
+        </nav>
+        <div class="source-note">
+          <span>Base</span>
+          Maestro Presupuestario DAF, versión 4, 02 Jul 2026.
+        </div>
+      </aside>
+
+      <main>
+        <section id="panel" class="topbar">
+          <div>
+            <p class="eyebrow">Presupuestos convertidos a pesos reales</p>
+            <h2>Seguimiento mensual de gasto real</h2>
+          </div>
+          <div class="actions">
+            <button id="exportCsv" class="button secondary" type="button">Exportar CSV</button>
+            <button id="syncSharedData" class="button secondary" type="button">Sincronizar datos</button>
+            <label class="button secondary import-button">
+              Importar CSV
+              <input id="importCsv" type="file" accept=".csv,text/csv" />
+            </label>
+            <button id="resetDemo" class="button ghost" type="button">Limpiar registros</button>
+          </div>
+        </section>
+
+        <section class="kpi-grid" aria-label="Indicadores principales">
+          <article class="kpi">
+            <span>Presupuesto anual</span>
+            <strong id="kpiBudget">$0</strong>
+            <small>Disponible para las tres iniciativas</small>
+          </article>
+          <article class="kpi">
+            <span>Gasto real</span>
+            <strong id="kpiSpent">$0</strong>
+            <small id="kpiDocs">0 documentos registrados</small>
+          </article>
+          <article class="kpi">
+            <span>Saldo</span>
+            <strong id="kpiBalance">$0</strong>
+            <small id="kpiBalanceHint">Sin movimientos</small>
+          </article>
+          <article class="kpi">
+            <span>Ejecución</span>
+            <strong id="kpiExecution">0%</strong>
+            <small id="kpiExecutionHint">Dentro del marco anual</small>
+          </article>
+          <article class="kpi">
+            <span>Cierre estimado</span>
+            <strong id="kpiProjected">$0</strong>
+            <small id="kpiProjectedHint">Sin proyecciones cargadas</small>
+          </article>
+        </section>
+
+        <section class="layout-two">
+          <div class="panel chart-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Ejecución presupuestaria</p>
+                <h3>Presupuesto usado por iniciativa</h3>
+              </div>
+              <select id="initiativeFilter" aria-label="Filtrar iniciativa"></select>
+            </div>
+            <canvas id="mainChart" height="118"></canvas>
+          </div>
+
+          <div class="panel status-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Lectura rápida</p>
+                <h3>Estado por iniciativa</h3>
+              </div>
+            </div>
+            <div id="initiativeCards" class="initiative-cards"></div>
+          </div>
+        </section>
+
+        <section class="panel monthly-forecast-panel" hidden>
+          <div class="section-heading">
+            <div>
+                <p class="eyebrow">Uso mensual del presupuesto</p>
+                <h3>Presupuesto mensual versus pagado real</h3>
+            </div>
+            <select id="monthlyComparisonFilter" aria-label="Filtrar comparativo mensual"></select>
+          </div>
+          <canvas id="monthlyComparisonChart" height="150"></canvas>
+          <div id="annualComparisonCards" class="projection-summary"></div>
+        </section>
+
+        <section id="presupuesto-base" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Maestro presupuestario</p>
+              <h3>Presupuesto base editable</h3>
+            </div>
+            <div class="actions">
+              <button id="restoreBudgetBase" class="button ghost" type="button">Restaurar maestro inicial</button>
+              <button id="saveBudgetBase" class="button primary" type="button">Guardar presupuesto</button>
+            </div>
+          </div>
+          <div class="projection-grid-tools">
+            <span>Edita los montos mensuales en pesos. Los graficos, saldos y alertas se recalculan con estos valores.</span>
+            <strong id="budgetBaseGrandTotal">$0</strong>
+          </div>
+          <div class="table-wrap budget-base-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Iniciativa</th>
+                  <th>Ene</th>
+                  <th>Feb</th>
+                  <th>Mar</th>
+                  <th>Abr</th>
+                  <th>May</th>
+                  <th>Jun</th>
+                  <th>Jul</th>
+                  <th>Ago</th>
+                  <th>Sep</th>
+                  <th>Oct</th>
+                  <th>Nov</th>
+                  <th>Dic</th>
+                  <th>Total anual</th>
+                </tr>
+              </thead>
+              <tbody id="budgetBaseRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="proveedores" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Maestro</p>
+              <h3>Proveedores y beneficiarias/os</h3>
+            </div>
+            <input id="providerSearch" class="search" type="search" placeholder="Buscar proveedor, persona u OC" />
+          </div>
+          <form id="providerForm" class="expense-form">
+            <label>
+              Tipo
+              <select id="providerType" required>
+                <option>JARDÍN INFANTIL</option>
+                <option>Sala Cuna</option>
+                <option>MONTO DIRECTO SALA CUNA</option>
+              </select>
+            </label>
+            <label>
+              Nombre proveedor/persona
+              <input id="providerName" type="text" required />
+            </label>
+            <label>
+              Funcionario/a asociado/a
+              <input id="providerEmployee" type="text" />
+            </label>
+            <label>
+              Correo
+              <input id="providerEmail" type="text" placeholder="Correo o lista de correos" />
+            </label>
+            <label>
+              Orden de compra
+              <input id="providerPo" type="text" />
+            </label>
+            <label>
+              Gestor / expediente
+              <input id="providerCase" type="text" />
+            </label>
+            <label>
+              Inicio de pagos
+              <input id="providerStartDate" type="date" />
+            </label>
+            <label>
+              Término de pagos
+              <input id="providerEndDate" type="date" />
+            </label>
+            <label>
+              Necesita F30-1
+              <select id="providerRequiresF30">
+                <option>No</option>
+                <option>Sí</option>
+              </select>
+            </label>
+            <label class="wide">
+              F30-1 que se debe pedir
+              <input id="providerF30" type="text" placeholder="Ej: marzo y septiembre 2026 / mensual / no aplica" />
+            </label>
+            <label>
+              Estado
+              <select id="providerStatus">
+                <option>Vigente</option>
+                <option>No vigente</option>
+              </select>
+            </label>
+            <label class="wide">
+              Observación
+              <input id="providerNotes" type="text" />
+            </label>
+            <p id="providerEditStatus" class="form-status wide"></p>
+            <div class="form-actions wide">
+              <button id="providerSubmit" class="button primary" type="submit">Guardar proveedor</button>
+              <button id="cancelProviderEdit" class="button ghost" type="button" hidden>Cancelar edición</button>
+            </div>
+          </form>
+          <div id="providerSections" class="provider-sections"></div>
+        </section>
+
+        <section id="control-proveedores" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Seguimiento por proveedor</p>
+              <h3>Pagos, pendientes y alertas</h3>
+            </div>
+            <select id="providerControlMonth" aria-label="Mes de control"></select>
+          </div>
+          <div id="providerControlCards" class="projection-summary"></div>
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Estado</th>
+                  <th>Proveedor/persona</th>
+                  <th>Tipo</th>
+                  <th>Total pagado</th>
+                  <th>Meses pagados</th>
+                  <th>Pendientes</th>
+                  <th>Último pago</th>
+                </tr>
+              </thead>
+              <tbody id="providerControlRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="documentos" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Carga documental</p>
+              <h3>Leer factura o resolución interna</h3>
+            </div>
+          </div>
+          <div class="document-grid">
+            <div class="upload-box">
+              <label>
+                Documento PDF
+                <input id="documentFile" type="file" accept="application/pdf,.pdf" multiple />
+              </label>
+              <label>
+                Si el PDF no se lee bien, pega aquí el texto
+                <textarea id="documentText" rows="8" placeholder="Texto extraído o copiado desde la factura/resolución"></textarea>
+              </label>
+              <div class="actions">
+                <button id="analyzeDocument" class="button secondary" type="button">Analizar documento</button>
+                <button id="useDocument" class="button secondary" type="button">Cargar al formulario</button>
+                <button id="saveDocumentExpense" class="button primary" type="button">Guardar gasto automático</button>
+              </div>
+            </div>
+            <div class="document-result">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Lectura sugerida</p>
+                  <h3>Datos encontrados</h3>
+                </div>
+              </div>
+              <div id="documentResult" class="doc-fields"></div>
+            </div>
+          </div>
+          <div class="bulk-documents">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Carga masiva</p>
+                <h3>Facturas y resoluciones detectadas</h3>
+              </div>
+              <div class="actions">
+                <button id="selectAllBulkDocuments" class="button secondary" type="button">Seleccionar todos</button>
+                <button id="clearBulkDocuments" class="button ghost" type="button">Quitar lote</button>
+                <button id="saveBulkDocuments" class="button primary" type="button">Guardar seleccionados</button>
+              </div>
+            </div>
+            <div class="table-wrap compact-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subir</th>
+                    <th>Estado</th>
+                    <th>Archivo</th>
+                    <th>Mes</th>
+                    <th>Iniciativa</th>
+                    <th>Documento</th>
+                    <th>Proveedor/persona</th>
+                    <th>Monto</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="bulkDocumentRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="proyeccion" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Escenario futuro</p>
+              <h3>Proyección por proveedor o persona</h3>
+            </div>
+          </div>
+          <div class="projection-summary" id="projectionSummary"></div>
+          <div class="projection-grid-tools">
+            <span>Incluye todos los proveedores reales y 6 escenarios futuros: 2 jardín infantil, 2 sala cuna y 2 monto directo.</span>
+            <button id="clearProjectionGrid" class="button ghost" type="button">Limpiar estimaciones</button>
+          </div>
+          <div id="projectionGridSections" class="projection-grid-sections"></div>
+        </section>
+
+        <section id="registro" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Ingreso mensual</p>
+              <h3>Registrar factura o resolución</h3>
+            </div>
+          </div>
+          <form id="expenseForm" class="expense-form">
+            <label>
+              Iniciativa
+              <select id="initiative" required></select>
+            </label>
+            <label>
+              Mes de gasto
+              <select id="month" required></select>
+            </label>
+            <label>
+              Tipo de documento
+              <select id="docType" required>
+                <option>Factura</option>
+                <option>Resolución</option>
+                <option>Otro respaldo</option>
+              </select>
+            </label>
+            <label>
+              Número de documento
+              <input id="docNumber" type="text" placeholder="Ej: FAC-1025 / RES-44" required />
+            </label>
+            <label>
+              Fecha
+              <input id="docDate" type="date" required />
+            </label>
+            <label>
+              Proveedor o persona
+              <input id="vendor" type="text" list="providerList" placeholder="Nombre asociado al pago" required />
+            </label>
+            <label>
+              Monto real en pesos
+              <input id="amount" type="number" min="1" step="1" placeholder="Ej: 1250000" required />
+            </label>
+            <label class="wide">
+              Observación
+              <input id="notes" type="text" placeholder="Comentario breve para la jefatura" />
+            </label>
+            <div class="rule-box wide">
+              <div>
+                <span>Regla de pago</span>
+                <strong id="paymentRuleTitle">Selecciona una iniciativa</strong>
+                <small id="paymentRuleDetail">Jardín: 4,9 UF. Sala cuna: total factura. Monto directo: $357.000.</small>
+              </div>
+              <label>
+                UF último día del mes
+                <input id="ufValue" type="number" min="0" step="0.01" placeholder="Solo para jardín" />
+              </label>
+              <label>
+                Monto sugerido
+                <input id="suggestedAmount" type="text" readonly />
+              </label>
+            <button id="applySuggestedAmount" class="button secondary" type="button">Aplicar sugerido</button>
+            </div>
+            <p id="expenseEditStatus" class="form-status wide"></p>
+            <div class="form-actions wide">
+              <button id="expenseSubmit" class="button primary" type="submit">Guardar registro</button>
+              <button id="cancelExpenseEdit" class="button ghost" type="button" hidden>Cancelar edición</button>
+            </div>
+          </form>
+          <datalist id="providerList"></datalist>
+        </section>
+
+        <section id="detalle" class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Control operativo</p>
+              <h3>Movimientos registrados</h3>
+            </div>
+            <input id="searchBox" class="search" type="search" placeholder="Buscar documento, proveedor o nota" />
+          </div>
+          <div id="expenseSections" class="expense-sections"></div>
+        </section>
+
+        <section id="presentacion" class="panel report-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Para jefatura</p>
+              <h3>Reporte ejecutivo</h3>
+            </div>
+            <div class="actions">
+              <button id="copyExecutiveReport" class="button secondary" type="button">Copiar resumen</button>
+              <button id="backupData" class="button ghost" type="button">Crear respaldo</button>
+            </div>
+          </div>
+          <div id="executiveReportCards" class="projection-summary"></div>
+          <div id="executiveSummary" class="summary-grid"></div>
+          <div class="report-grid">
+            <section class="report-block">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Semáforo</p>
+                  <h3>Decisión por iniciativa</h3>
+                </div>
+              </div>
+              <div id="decisionMatrix" class="decision-list"></div>
+            </section>
+            <section class="report-block">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Alertas</p>
+                  <h3>Acciones pendientes</h3>
+                </div>
+              </div>
+              <div id="executiveAlerts" class="alert-list"></div>
+            </section>
+          </div>
+          <div class="report-grid">
+            <section class="report-block">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Proveedor/persona</p>
+                  <h3>Ficha rápida</h3>
+                </div>
+                <select id="providerReportSelect" aria-label="Seleccionar proveedor para reporte"></select>
+              </div>
+              <div id="providerReportCard" class="provider-report-card"></div>
+            </section>
+            <section class="report-block">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Texto listo</p>
+                  <h3>Minuta para copiar</h3>
+                </div>
+              </div>
+              <textarea id="executiveReportText" class="report-text" readonly></textarea>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="app.js?v=20260715-19"></script>
+  </body>
+</html>
