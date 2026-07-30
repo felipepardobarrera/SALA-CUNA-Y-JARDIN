@@ -443,13 +443,27 @@ async function loadSharedData() {
       applySharedData(result.data);
       return;
     }
+    if (await loadStaticSharedData()) return;
     if (localDataHasRecords()) {
       sharedDataReady = true;
       await saveSharedDataNow();
       sharedDataReady = false;
     }
   } catch {
-    // La app puede seguir funcionando localmente si el archivo central no responde.
+    await loadStaticSharedData();
+  }
+}
+
+async function loadStaticSharedData() {
+  try {
+    const response = await fetch(new URL("data/control-presupuestario.json", window.location.href), { cache: "no-store" });
+    if (!response.ok) return false;
+    const data = await response.json();
+    if (!data || typeof data !== "object") return false;
+    applySharedData(data);
+    return true;
+  } catch {
+    return false;
   }
 }
 
