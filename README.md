@@ -8,11 +8,11 @@ Sistema web interno para controlar gasto real, presupuesto base y proyecciones d
 
 La aplicacion permite registrar facturas o resoluciones, cargar documentos PDF, administrar proveedores, revisar alertas, editar presupuesto base mensual y compartir los datos desde un servidor central dentro de la red.
 
-## Datos cargados visibles
+## Datos cargados visibles en GitHub
 
-- [Resumen de datos cargados](docs/RESUMEN_DATOS.md)
-- [Proveedores cargados](docs/PROVEEDORES.md)
-- [Pagos cargados](docs/PAGOS.md)
+- [Resumen de datos cargados](RESUMEN_DATOS.md)
+- [Proveedores cargados](PROVEEDORES.md)
+- [Pagos cargados](PAGOS.md)
 
 ## Requisitos
 
