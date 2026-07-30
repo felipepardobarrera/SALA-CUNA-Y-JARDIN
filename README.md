@@ -8,6 +8,12 @@ Sistema web interno para controlar gasto real, presupuesto base y proyecciones d
 
 La aplicacion permite registrar facturas o resoluciones, cargar documentos PDF, administrar proveedores, revisar alertas, editar presupuesto base mensual y compartir los datos desde un servidor central dentro de la red.
 
+## Datos cargados visibles
+
+- [Resumen de datos cargados](docs/RESUMEN_DATOS.md)
+- [Proveedores cargados](docs/PROVEEDORES.md)
+- [Pagos cargados](docs/PAGOS.md)
+
 ## Requisitos
 
 - Node.js 18 o superior
@@ -104,4 +110,3 @@ data/            Datos compartidos del sistema
 3. Ejecutar `npm start`.
 4. Compartir a los usuarios el enlace `http://IP_DEL_SERVIDOR:8123/`.
 5. Si se actualiza el codigo desde GitHub, reiniciar el servidor.
-
