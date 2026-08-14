@@ -889,15 +889,20 @@ function fillSelectors() {
   document.querySelector("#initiative").innerHTML = initiativeOptions;
   if (document.querySelector("#projectionInitiative")) document.querySelector("#projectionInitiative").innerHTML = initiativeOptions;
   document.querySelector("#initiativeFilter").innerHTML = `<option value="all">Todas las iniciativas</option>${initiativeOptions}`;
+  document.querySelector("#projectionInitiativeFilter").innerHTML = `<option value="all">Todas las iniciativas</option>${initiativeOptions}`;
   document.querySelector("#monthlyComparisonFilter").innerHTML = `<option value="all">Todas las iniciativas</option>${initiativeOptions}`;
   document.querySelector("#month").innerHTML = MONTHS.map((month, index) => `<option value="${index}">${month}</option>`).join("");
   document.querySelector("#providerControlMonth").innerHTML = MONTHS.map((month, index) => `<option value="${index}">Control hasta ${month}</option>`).join("");
   if (document.querySelector("#projectionStart")) document.querySelector("#projectionStart").innerHTML = MONTHS.map((month, index) => `<option value="${index}">${month}</option>`).join("");
   if (document.querySelector("#projectionEnd")) document.querySelector("#projectionEnd").innerHTML = MONTHS.map((month, index) => `<option value="${index}">${month}</option>`).join("");
+  document.querySelector("#projectionQuickStart").innerHTML = MONTHS.map((month, index) => `<option value="${index}">${month}</option>`).join("");
+  document.querySelector("#projectionQuickEnd").innerHTML = MONTHS.map((month, index) => `<option value="${index}">${month}</option>`).join("");
   const currentMonth = Math.min(11, Math.max(0, new Date().getMonth()));
   document.querySelector("#providerControlMonth").value = String(currentMonth);
   if (document.querySelector("#projectionStart")) document.querySelector("#projectionStart").value = String(currentMonth);
   if (document.querySelector("#projectionEnd")) document.querySelector("#projectionEnd").value = "11";
+  document.querySelector("#projectionQuickStart").value = String(Math.min(11, currentMonth + 1));
+  document.querySelector("#projectionQuickEnd").value = "11";
   document.querySelector("#docDate").valueAsDate = new Date();
   refreshProviderList();
 }
@@ -960,6 +965,9 @@ function setupCollapsiblePanels() {
       const nextState = loadPanelState();
       nextState[config.id] = nextCollapsed;
       savePanelState(nextState);
+      if (!nextCollapsed && config.id === "proyeccion") {
+        requestAnimationFrame(renderProjectionInitiativeOverview);
+      }
     });
 
     const actions = heading.querySelector(":scope > .actions");
@@ -1041,12 +1049,8 @@ function fillProviderForm(provider) {
 function renderKpis() {
   const budget = INITIATIVES.reduce((sum, item) => sum + totalBudget(item), 0);
   const spent = expenseTotal();
-  const forecast = projectedTotal();
-  const projectedClose = spent + forecast;
   const balance = budget - spent;
-  const projectedBalance = budget - projectedClose;
   const execution = budget ? spent / budget : 0;
-  const projectedExecution = budget ? projectedClose / budget : 0;
 
   document.querySelector("#kpiBudget").textContent = money.format(budget);
   document.querySelector("#kpiSpent").textContent = money.format(spent);
@@ -1055,10 +1059,6 @@ function renderKpis() {
   document.querySelector("#kpiBalanceHint").textContent = balance >= 0 ? "Saldo disponible" : "SobreejecuciÃ³n anual";
   document.querySelector("#kpiExecution").textContent = `${Math.round(execution * 100)}%`;
   document.querySelector("#kpiExecutionHint").textContent = execution <= 0.85 ? "Dentro del marco anual" : execution <= 1 ? "Revisar prÃ³ximos meses" : "Solicitar ajuste urgente";
-  document.querySelector("#kpiProjected").textContent = money.format(projectedClose);
-  document.querySelector("#kpiProjectedHint").textContent = projections.length
-    ? `Saldo proyectado: ${money.format(projectedBalance)} (${Math.round(projectedExecution * 100)}%)`
-    : "Sin proyecciones cargadas";
 }
 
 function renderInitiativeCards() {
@@ -1066,9 +1066,7 @@ function renderInitiativeCards() {
   container.innerHTML = INITIATIVES.map((item) => {
     const budget = totalBudget(item);
     const spent = expenseTotal(item.id);
-    const forecast = projectedTotal(item.id);
-    const close = spent + forecast;
-    const ratio = budget ? close / budget : 0;
+    const ratio = budget ? spent / budget : 0;
     const stateClass = ratio > 1 ? "risk" : ratio >= 0.85 ? "warn" : "ok";
     const stateText = ratio > 1 ? "CrÃ­tico" : ratio >= 0.85 ? "AtenciÃ³n" : "Normal";
     return `
@@ -1081,9 +1079,8 @@ function renderInitiativeCards() {
           <span style="--value:${Math.round(ratio * 100)}%"></span>
         </div>
         <div class="money-row"><span>Gastado real</span><b>${money.format(spent)}</b></div>
-        <div class="money-row"><span>Proyectado</span><b>${money.format(forecast)}</b></div>
         <div class="money-row"><span>Presupuesto</span><b>${money.format(budget)}</b></div>
-        <div class="money-row"><span>Saldo estimado</span><b>${money.format(budget - close)}</b></div>
+        <div class="money-row"><span>Saldo real</span><b>${money.format(budget - spent)}</b></div>
       </article>
     `;
   }).join("");
@@ -1094,7 +1091,7 @@ function renderChart() {
   const data = filterId === "all"
     ? INITIATIVES.map((item) => ({ label: item.shortName, budget: totalBudget(item), spent: expenseTotal(item.id), projected: projectedTotal(item.id) }))
     : [byInitiative(filterId)].map((item) => ({ label: item.shortName, budget: totalBudget(item), spent: expenseTotal(item.id), projected: projectedTotal(item.id) }));
-  drawBudgetUseChart(document.querySelector("#mainChart"), data);
+  drawBudgetUseChart(document.querySelector("#mainChart"), data, false);
 }
 
 function renderMonthlyComparison() {
@@ -1343,7 +1340,7 @@ function drawLineChart(canvas, series) {
   });
 }
 
-function drawBudgetUseChart(canvas, rows) {
+function drawBudgetUseChart(canvas, rows, includeProjection = true) {
   const rect = canvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
   const visualHeight = Math.max(300, rows.length * 96 + 92);
@@ -1360,11 +1357,11 @@ function drawBudgetUseChart(canvas, rows) {
   const barW = Math.max(120, width - pad.left - pad.right);
   ctx.font = "12px Segoe UI, Arial, sans-serif";
   ctx.fillStyle = "#66727f";
-  ctx.fillText("Pagado real y proyeccion sobre presupuesto anual", pad.left, 18);
+  ctx.fillText(includeProjection ? "Pagado real y proyeccion sobre presupuesto anual" : "Pagado real sobre presupuesto anual", pad.left, 18);
 
   rows.forEach((row, index) => {
     const y = pad.top + index * 96;
-    const projected = Number(row.projected || 0);
+    const projected = includeProjection ? Number(row.projected || 0) : 0;
     const close = Number(row.spent || 0) + projected;
     const ratioUsed = row.budget ? close / row.budget : 0;
     const spentW = Math.min(barW, barW * (Number(row.spent || 0) / Math.max(1, row.budget)));
@@ -1376,7 +1373,7 @@ function drawBudgetUseChart(canvas, rows) {
     ctx.fillText(row.label, 8, y + 20);
     ctx.font = "12px Segoe UI, Arial, sans-serif";
     ctx.fillStyle = "#66727f";
-    ctx.fillText(`Real ${money.format(row.spent)} + proy. ${money.format(projected)}`, 8, y + 40);
+    ctx.fillText(includeProjection ? `Real ${money.format(row.spent)} + proy. ${money.format(projected)}` : `Pagado real ${money.format(row.spent)}`, 8, y + 40);
 
     ctx.fillStyle = "#e6edf0";
     ctx.fillRect(pad.left, y + 10, barW, 24);
@@ -1386,10 +1383,10 @@ function drawBudgetUseChart(canvas, rows) {
     ctx.fillRect(pad.left + spentW, y + 10, projectedW, 24);
     ctx.fillStyle = "#1f2f3f";
     ctx.font = "800 12px Segoe UI, Arial, sans-serif";
-    ctx.fillText(`${Math.round(ratioUsed * 100)}% real + proyeccion`, pad.left, y + 56);
+    ctx.fillText(includeProjection ? `${Math.round(ratioUsed * 100)}% real + proyeccion` : `${Math.round(ratioUsed * 100)}% ejecutado real`, pad.left, y + 56);
     ctx.fillStyle = "#66727f";
     ctx.font = "12px Segoe UI, Arial, sans-serif";
-    ctx.fillText(`Saldo estimado: ${money.format(row.budget - close)}`, pad.left, y + 76);
+    ctx.fillText(`${includeProjection ? "Saldo estimado" : "Saldo real"}: ${money.format(row.budget - close)}`, pad.left, y + 76);
   });
 
   const legendY = visualHeight - 22;
@@ -1397,10 +1394,12 @@ function drawBudgetUseChart(canvas, rows) {
   ctx.fillRect(pad.left, legendY - 10, 14, 10);
   ctx.fillStyle = "#66727f";
   ctx.fillText("Pagado real", pad.left + 20, legendY);
-  ctx.fillStyle = "#e29b32";
-  ctx.fillRect(pad.left + 120, legendY - 10, 14, 10);
-  ctx.fillStyle = "#66727f";
-  ctx.fillText("Proyectado", pad.left + 140, legendY);
+  if (includeProjection) {
+    ctx.fillStyle = "#e29b32";
+    ctx.fillRect(pad.left + 120, legendY - 10, 14, 10);
+    ctx.fillStyle = "#66727f";
+    ctx.fillText("Proyectado", pad.left + 140, legendY);
+  }
 }
 
 function drawMonthlyBudgetUseChart(canvas, budget, paid) {
@@ -2306,6 +2305,79 @@ function renderProjectionGrid() {
   requestAnimationFrame(() => window.scrollTo({ ...pagePosition, behavior: "instant" }));
 }
 
+function renderProjectionQuickForm() {
+  const select = document.querySelector("#projectionQuickProvider");
+  const current = select.value;
+  const projectionProviders = visibleProjectionProviders();
+  select.innerHTML = INITIATIVES.map((initiative) => {
+    const options = projectionProviders
+      .filter((provider) => providerInitiative(provider) === initiative.id)
+      .map((provider) => `<option value="${provider.id}">${provider.name}${provider.employee ? ` - ${provider.employee}` : ""}</option>`)
+      .join("");
+    return `<optgroup label="${initiative.shortName}">${options}</optgroup>`;
+  }).join("");
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+function renderProjectionInitiativeOverview() {
+  const filterId = document.querySelector("#projectionInitiativeFilter").value;
+  const initiatives = filterId === "all" ? INITIATIVES : [byInitiative(filterId)];
+  const data = initiatives.map((item) => ({
+    label: item.shortName,
+    budget: totalBudget(item),
+    spent: expenseTotal(item.id),
+    projected: projectedTotal(item.id),
+  }));
+  drawBudgetUseChart(document.querySelector("#projectionBudgetChart"), data, true);
+
+  document.querySelector("#projectionInitiativeCards").innerHTML = initiatives.map((item) => {
+    const budget = totalBudget(item);
+    const spent = expenseTotal(item.id);
+    const forecast = projectedTotal(item.id);
+    const close = spent + forecast;
+    const ratio = budget ? close / budget : 0;
+    const stateClass = ratio > 1 ? "risk" : ratio >= 0.85 ? "warn" : "ok";
+    const stateText = ratio > 1 ? "Crítico" : ratio >= 0.85 ? "Atención" : "Normal";
+    return `
+      <article class="initiative-card">
+        <div class="initiative-title"><strong>${item.shortName}</strong><span class="badge ${stateClass}">${stateText}</span></div>
+        <div class="progress" aria-label="Cierre proyectado ${item.shortName}"><span style="--value:${Math.round(ratio * 100)}%"></span></div>
+        <div class="money-row"><span>Pagado real</span><b>${money.format(spent)}</b></div>
+        <div class="money-row"><span>Proyectado</span><b>${money.format(forecast)}</b></div>
+        <div class="money-row"><span>Presupuesto</span><b>${money.format(budget)}</b></div>
+        <div class="money-row"><span>Saldo al cierre</span><b>${money.format(budget - close)}</b></div>
+      </article>
+    `;
+  }).join("");
+}
+
+function applyProjectionQuickPeriod(clearValues = false) {
+  const provider = visibleProjectionProviders().find((item) => item.id === document.querySelector("#projectionQuickProvider").value);
+  const start = Number(document.querySelector("#projectionQuickStart").value);
+  const end = Number(document.querySelector("#projectionQuickEnd").value);
+  const amount = Number(document.querySelector("#projectionQuickAmount").value || 0);
+  if (!provider) return;
+  if (end < start) {
+    alert("El mes final debe ser igual o posterior al mes inicial.");
+    return;
+  }
+  if (!clearValues && amount <= 0) {
+    alert("Ingresa un monto mensual mayor que cero.");
+    return;
+  }
+
+  for (let month = start; month <= end; month += 1) {
+    if (!providerMonthIsWithinPayments(provider, month) || providerMonthPaid(provider, month)) continue;
+    const key = projectionGridKey(provider.id, month);
+    if (clearValues) delete projectionGrid[key];
+    else projectionGrid[key] = amount;
+    delete projectionPaidGrid[key];
+  }
+  saveProjectionGrid();
+  saveProjectionPaidGrid();
+  renderAll();
+}
+
 function renderProjectionSummary() {
   const budget = INITIATIVES.reduce((sum, item) => sum + totalBudget(item), 0);
   const spent = expenseTotal();
@@ -2792,8 +2864,10 @@ function renderAll() {
   renderProviderControl();
   renderRows();
   renderProjectionRows();
+  renderProjectionQuickForm();
   renderProjectionGrid();
   renderProjectionSummary();
+  renderProjectionInitiativeOverview();
   renderPaymentRule();
   renderSummary();
   renderBulkDocuments();
@@ -3204,10 +3278,26 @@ document.querySelector("#bulkDocumentRows").addEventListener("change", (event) =
 });
 
 document.querySelector("#initiativeFilter").addEventListener("change", renderChart);
+document.querySelector("#projectionInitiativeFilter").addEventListener("change", renderProjectionInitiativeOverview);
 document.querySelector("#monthlyComparisonFilter").addEventListener("change", renderMonthlyComparison);
 window.addEventListener("resize", () => {
   renderChart();
+  renderProjectionInitiativeOverview();
   renderMonthlyComparison();
+});
+document.querySelector("#projectionQuickForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  applyProjectionQuickPeriod(false);
+});
+document.querySelector("#clearProjectionPeriod").addEventListener("click", () => applyProjectionQuickPeriod(true));
+document.querySelectorAll(".nav-list a").forEach((link) => {
+  link.addEventListener("click", () => {
+    const panelId = link.getAttribute("href")?.slice(1);
+    if (!panelId) return;
+    expandPanel(panelId);
+    document.querySelectorAll(".nav-list a").forEach((item) => item.classList.toggle("active", item === link));
+    if (panelId === "proyeccion") requestAnimationFrame(renderProjectionInitiativeOverview);
+  });
 });
 document.querySelector("#searchBox").addEventListener("input", renderRows);
 document.querySelector("#providerSearch").addEventListener("input", renderProviders);

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Control presupuestario sala cuna y jardín</title>
-    <link rel="stylesheet" href="styles.css?v=20260814-3" />
+    <link rel="stylesheet" href="styles.css?v=20260814-4" />
   </head>
   <body>
     <div class="app-shell">
@@ -17,13 +17,13 @@
           </div>
         </div>
         <nav class="nav-list" aria-label="Secciones">
-          <a href="#panel" class="active">Panel</a>
+          <a href="#panel" class="active">Panel real</a>
           <a href="#presupuesto-base">Presupuesto base</a>
           <a href="#proveedores">Proveedores</a>
           <a href="#control-proveedores">Control proveedores</a>
           <a href="#documentos">Documentos</a>
           <a href="#registro">Registro</a>
-          <a href="#proyeccion">Proyección</a>
+          <a href="#proyeccion">Escenario proyectado</a>
           <a href="#detalle">Detalle</a>
           <a href="#presentacion">Informe</a>
         </nav>
@@ -70,11 +70,6 @@
             <span>Ejecución</span>
             <strong id="kpiExecution">0%</strong>
             <small id="kpiExecutionHint">Dentro del marco anual</small>
-          </article>
-          <article class="kpi">
-            <span>Cierre estimado</span>
-            <strong id="kpiProjected">$0</strong>
-            <small id="kpiProjectedHint">Sin proyecciones cargadas</small>
           </article>
         </section>
 
@@ -330,12 +325,65 @@
               <h3>Proyección por proveedor o persona</h3>
             </div>
           </div>
+          <div class="projection-overview-grid">
+            <div class="projection-overview-chart">
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Presupuesto proyectado</p>
+                  <h3>Real y proyección por iniciativa</h3>
+                </div>
+                <select id="projectionInitiativeFilter" aria-label="Filtrar proyección por iniciativa"></select>
+              </div>
+              <canvas id="projectionBudgetChart" height="118"></canvas>
+            </div>
+            <div>
+              <div class="section-heading compact-heading">
+                <div>
+                  <p class="eyebrow">Cierre futuro</p>
+                  <h3>Estado proyectado</h3>
+                </div>
+              </div>
+              <div id="projectionInitiativeCards" class="initiative-cards"></div>
+            </div>
+          </div>
           <div class="projection-summary" id="projectionSummary"></div>
+          <form id="projectionQuickForm" class="projection-quick-form">
+            <div class="projection-quick-heading">
+              <div>
+                <p class="eyebrow">Ingreso rápido</p>
+                <h3>Completar varios meses</h3>
+              </div>
+              <small>Selecciona un proveedor o escenario y aplica el mismo monto al período.</small>
+            </div>
+            <label>
+              Proveedor o persona
+              <select id="projectionQuickProvider" required></select>
+            </label>
+            <label>
+              Desde
+              <select id="projectionQuickStart" required></select>
+            </label>
+            <label>
+              Hasta
+              <select id="projectionQuickEnd" required></select>
+            </label>
+            <label>
+              Monto mensual en pesos
+              <input id="projectionQuickAmount" type="number" min="0" step="1" placeholder="Ej: 357000" required />
+            </label>
+            <div class="projection-quick-actions">
+              <button class="button primary" type="submit">Aplicar monto</button>
+              <button id="clearProjectionPeriod" class="button ghost" type="button">Limpiar período</button>
+            </div>
+          </form>
           <div class="projection-grid-tools">
             <span>Incluye todos los proveedores reales y 6 escenarios futuros: 2 jardín infantil, 2 sala cuna y 2 monto directo.</span>
             <button id="clearProjectionGrid" class="button ghost" type="button">Limpiar estimaciones</button>
           </div>
-          <div id="projectionGridSections" class="projection-grid-sections"></div>
+          <details class="projection-detail-editor">
+            <summary><strong>Edición detallada por mes</strong><small>Abre esta sección solamente para cambiar meses individuales o marcar pagos.</small></summary>
+            <div id="projectionGridSections" class="projection-grid-sections"></div>
+          </details>
         </section>
 
         <section id="registro" class="panel">
@@ -481,6 +529,6 @@
       </main>
     </div>
     <input id="rowPdfAttachment" type="file" accept="application/pdf" hidden />
-    <script src="app.js?v=20260814-9"></script>
+    <script src="app.js?v=20260814-10"></script>
   </body>
 </html>
