@@ -702,6 +702,19 @@ function providerMatchesExpense(provider, expense) {
   const providerWords = [...new Set(normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !ignoredWords.has(word)))];
   const expenseWords = new Set(normalizeText(readableText(expense.vendor)).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
   const sharedWords = providerWords.filter((word) => expenseWords.has(word));
+  const isVtmProvider = normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).includes("vtm");
+  if (isVtmProvider) {
+    const identityWords = [...new Set(normalizeText(readableText(`${provider.name} ${provider.employee || ""}`))
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 4 && !ignoredWords.has(word)))];
+    return Boolean(
+      (name && vendor === name)
+      || (employee && (vendor.includes(employee) || notes.includes(employee)))
+      || (po && (vendor.includes(po) || notes.includes(po)))
+      || identityWords.some((word) => vendor.includes(word) || notes.includes(word))
+    );
+  }
   return Boolean(
     (name && vendor.includes(name)) ||
     (employee && (vendor.includes(employee) || notes.includes(employee))) ||
