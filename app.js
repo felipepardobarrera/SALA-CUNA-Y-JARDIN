@@ -375,7 +375,8 @@ async function viewPdfAttachment(expenseId) {
 
 function pdfViewButton(expense) {
   return expense.hasAttachment
-    ? `<button class="mini-btn" type="button" data-action="view-pdf" data-id="${expense.id}">Ver factura</button>`
+    ? `<button class="mini-btn" type="button" data-action="view-pdf" data-id="${expense.id}">Ver factura</button>
+       <button class="mini-btn" type="button" data-action="attach-pdf" data-id="${expense.id}">Cambiar factura</button>`
     : `<button class="mini-btn" type="button" data-action="attach-pdf" data-id="${expense.id}">Adjuntar factura</button>`;
 }
 
@@ -3006,7 +3007,7 @@ document.querySelector("#rowPdfAttachment").addEventListener("change", async (ev
     expense.sourceFile = file.name;
     saveExpenses();
     renderAll();
-    alert("Factura guardada. Ahora puedes abrirla con el botón Ver factura.");
+    alert("Factura guardada o reemplazada. Ahora puedes abrirla con el botón Ver factura.");
   } catch {
     alert("No se pudo guardar la factura en este navegador.");
   }
