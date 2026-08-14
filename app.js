@@ -84,6 +84,7 @@ const PROJECTION_PAID_KEY = "control-presupuestario-proyeccion-pagado-v1";
 const PROVIDER_KEY = "control-presupuestario-proveedores-v1";
 const BUDGET_KEY = "control-presupuestario-presupuesto-base-v1";
 const COLLAPSE_KEY = "control-presupuestario-paneles-v1";
+const STATIC_DATA_VERSION_KEY = "control-presupuestario-datos-publicados-v1";
 
 function readableText(value) {
   if (typeof value !== "string") return value;
@@ -177,6 +178,7 @@ applyBudgetOverrides(loadBudgets());
 
 let sharedDataReady = false;
 let sharedDataTimer = null;
+let pendingProviderUpload = null;
 let expenses = loadExpenses();
 let projections = loadProjections();
 let projectionGrid = loadProjectionGrid();
@@ -437,7 +439,10 @@ async function loadSharedData() {
       }
     }
     const response = await fetch("/api/shared-data");
-    if (!response.ok) return;
+    if (!response.ok) {
+      await loadStaticSharedData();
+      return;
+    }
     const result = await response.json();
     if (result.exists && result.data) {
       applySharedData(result.data);
@@ -460,7 +465,10 @@ async function loadStaticSharedData() {
     if (!response.ok) return false;
     const data = await response.json();
     if (!data || typeof data !== "object") return false;
+    const version = String(data.updatedAt || "sin-fecha");
+    if (localStorage.getItem(STATIC_DATA_VERSION_KEY) === version && localDataHasRecords()) return true;
     applySharedData(data);
+    localStorage.setItem(STATIC_DATA_VERSION_KEY, version);
     return true;
   } catch {
     return false;
@@ -543,10 +551,15 @@ function providerMatchesExpense(provider, expense) {
   const name = compactText(provider.name);
   const employee = compactText(provider.employee);
   const po = compactText(provider.po);
+  const ignoredWords = new Set(["de", "del", "la", "el", "y", "ltda", "limitada", "spa", "sociedad", "corporacion", "corp", "educacional"]);
+  const providerWords = normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !ignoredWords.has(word));
+  const expenseWords = new Set(normalizeText(readableText(expense.vendor)).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const sharedWords = providerWords.filter((word) => expenseWords.has(word));
   return Boolean(
     (name && vendor.includes(name)) ||
     (employee && (vendor.includes(employee) || notes.includes(employee))) ||
-    (po && (vendor.includes(po) || notes.includes(po)))
+    (po && (vendor.includes(po) || notes.includes(po))) ||
+    (providerWords.length >= 2 && sharedWords.length >= 2)
   );
 }
 
@@ -1082,6 +1095,12 @@ function renderProviderControl() {
         <td>${row.paidMonths.length ? row.paidMonths.map((month) => MONTHS[month].slice(0, 3)).join(", ") : "Sin meses"}</td>
         <td>${row.status.missing.length ? row.status.missing.map((month) => MONTHS[month].slice(0, 3)).join(", ") : "Sin pendientes"}</td>
         <td>${row.lastExpense ? `${MONTHS[row.lastExpense.month]}<br><small>${row.lastExpense.docType} ${row.lastExpense.docNumber}</small>` : "Sin registro"}</td>
+        <td>
+          <div class="row-actions">
+            <button class="edit-btn" type="button" data-action="register-payment" data-id="${row.provider.id}" data-month="${controlMonth}">${row.providerExpenses.some((expense) => Number(expense.month) === controlMonth) ? "Editar monto" : "Registrar monto"}</button>
+            <button class="mini-btn" type="button" data-action="upload-invoice" data-id="${row.provider.id}" data-month="${controlMonth}">Subir factura</button>
+          </div>
+        </td>
       </tr>
     `).join("");
 }
@@ -2760,6 +2779,38 @@ document.querySelector("#providerSections").addEventListener("click", (event) =>
   renderAll();
 });
 
+document.querySelector("#providerControlRows").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const provider = providers.find((item) => item.id === button.dataset.id);
+  const month = Number(button.dataset.month);
+  if (!provider || Number.isNaN(month)) return;
+
+  if (button.dataset.action === "upload-invoice") {
+    pendingProviderUpload = { providerId: provider.id, month };
+    const fileInput = document.querySelector("#documentFile");
+    fileInput.value = "";
+    document.querySelector("#documentos").scrollIntoView({ behavior: "smooth" });
+    fileInput.click();
+    return;
+  }
+
+  const existing = expensesForProvider(provider).find((expense) => Number(expense.month) === month);
+  if (existing) {
+    fillExpenseFormFromExpense(existing);
+  } else {
+    document.querySelector("#expenseForm").reset();
+    clearExpenseEditMode();
+    document.querySelector("#initiative").value = providerInitiative(provider);
+    document.querySelector("#month").value = String(month);
+    document.querySelector("#docType").value = "Factura";
+    document.querySelector("#docDate").valueAsDate = new Date();
+    document.querySelector("#vendor").value = provider.name;
+    renderPaymentRule();
+  }
+  document.querySelector("#registro").scrollIntoView({ behavior: "smooth" });
+});
+
 document.querySelector("#expenseSections").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
@@ -2870,7 +2921,7 @@ async function analyzeDocumentInput() {
       let data;
       try {
         const serverItem = serverTexts?.find((item) => item.name === file.name);
-        const fileText = serverItem ? serverItem.text : location.protocol.startsWith("http") ? "" : await extractPdfText(file);
+        const fileText = serverItem?.text || await extractPdfText(file);
         if (fileText) {
           const entries = analyzeDocumentEntries(fileText, file.name);
           entries.forEach((entry) => {
@@ -2899,7 +2950,7 @@ async function analyzeDocumentInput() {
   const file = files[0];
   if (!text && file) {
     const serverTexts = await extractPdfTextsWithServer([file]);
-    text = serverTexts?.[0]?.text || (location.protocol.startsWith("http") ? "" : await extractPdfText(file));
+    text = serverTexts?.[0]?.text || await extractPdfText(file);
     document.querySelector("#documentText").value = text || "No se pudo leer texto suficiente desde este PDF. Copia y pega el texto aquÃ­ para analizarlo.";
   }
   if (!text) {
@@ -2924,7 +2975,20 @@ document.querySelector("#analyzeDocument").addEventListener("click", async () =>
 });
 document.querySelector("#documentFile").addEventListener("change", async () => {
   document.querySelector("#documentText").value = "";
-  await analyzeDocumentInput();
+  const data = await analyzeDocumentInput();
+  if (data && pendingProviderUpload) {
+    const provider = providers.find((item) => item.id === pendingProviderUpload.providerId);
+    if (provider) {
+      data.provider = provider.name;
+      data.employee = provider.employee || data.employee;
+      data.initiativeId = providerInitiative(provider);
+      data.month = pendingProviderUpload.month;
+      lastDocumentData = data;
+      renderDocumentResult(data);
+      fillExpenseFormFromDocument(data);
+    }
+    pendingProviderUpload = null;
+  }
 });
 document.querySelector("#useDocument").addEventListener("click", () => {
   if (!lastDocumentData) {
