@@ -745,19 +745,14 @@ function providerMatchesExpense(provider, expense) {
   );
 }
 
-function isSofiaBrunnerProvider(provider) {
-  const identity = compactText(`${provider?.name || ""} ${provider?.employee || ""}`);
-  return identity.includes("vtmsbrunner") || identity.includes("sofiabrunner");
-}
-
 function expensesForProvider(provider) {
   const uniqueExpenses = uniqueArrayBy(expenses, expenseMergeKey);
   const matched = uniqueExpenses.filter((expense) => providerMatchesExpense(provider, expense));
-  if (!isSofiaBrunnerProvider(provider)) return matched;
+  if (!isVtmProvider(provider)) return matched;
   const exactVendor = uniqueExpenses.find((expense) =>
     compactText(expense.vendor) === compactText(provider.name) && Number(expense.amount) === 194530);
   const payment = exactVendor || matched.find((expense) => Number(expense.amount) === 194530);
-  return payment ? [{ ...payment, month: 10, amount: 194530 }] : [];
+  return payment ? [{ ...payment, vendor: provider.name, month: 10, amount: 194530 }] : [];
 }
 
 function expenseTotal(filterId = "all") {
@@ -910,11 +905,13 @@ function providerMonthIsWithinPayments(provider, month) {
 }
 
 function providerMonthPaid(provider, month) {
+  if (isVtmProvider(provider)) return month === 10;
   return expensesForProvider(provider).some((expense) =>
     Number(expense.month) === month && expense.initiativeId === providerInitiative(provider));
 }
 
 function providerMonthPaidAmount(provider, month) {
+  if (isVtmProvider(provider)) return month === 10 ? 194530 : 0;
   return expensesForProvider(provider)
     .filter((expense) => Number(expense.month) === month && expense.initiativeId === providerInitiative(provider))
     .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
