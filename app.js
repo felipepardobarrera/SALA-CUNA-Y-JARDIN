@@ -88,6 +88,7 @@ const STATIC_DATA_VERSION_KEY = "control-presupuestario-datos-publicados-v1";
 const NO_PAYMENT_KEY = "control-presupuestario-sin-pago-mensual-v1";
 const EXPENSE_DISCLOSURE_KEY = "control-presupuestario-despliegue-pagos-v1";
 const DISMISSED_ALERTS_KEY = "control-presupuestario-alertas-ocultas-v1";
+const DELETED_PROVIDERS_KEY = "control-presupuestario-proveedores-eliminados-v1";
 
 function readableText(value) {
   if (typeof value !== "string") return value;
@@ -167,7 +168,7 @@ cleanTextList(PROJECTION_SCENARIO_PROVIDERS);
 function resetLocalDataIfRequested() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("resetLocal") !== "1") return;
-  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY, NO_PAYMENT_KEY, DISMISSED_ALERTS_KEY].forEach((key) => {
+  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY, NO_PAYMENT_KEY, DISMISSED_ALERTS_KEY, DELETED_PROVIDERS_KEY].forEach((key) => {
     localStorage.removeItem(key);
   });
   params.delete("resetLocal");
@@ -190,6 +191,7 @@ let projectionPaidGrid = loadProjectionPaidGrid();
 let providers = loadProviders();
 let noPaymentGrid = loadNoPaymentGrid();
 let dismissedAlerts = loadDismissedAlerts();
+let deletedProviderIds = loadDeletedProviderIds();
 expenses = cleanTextList(expenses);
 projections = cleanTextList(projections);
 providers = cleanTextList(providers);
@@ -424,6 +426,69 @@ function saveDismissedAlerts() {
   scheduleSharedDataSave();
 }
 
+function loadDeletedProviderIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DELETED_PROVIDERS_KEY));
+    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDeletedProviderIds() {
+  localStorage.setItem(DELETED_PROVIDERS_KEY, JSON.stringify(deletedProviderIds));
+  scheduleSharedDataSave();
+}
+
+function withoutProviderKeys(source, providerIds) {
+  return Object.fromEntries(Object.entries(source || {}).filter(([key]) =>
+    !providerIds.some((providerId) => key === providerId || key.startsWith(`${providerId}:`))));
+}
+
+async function deleteProviderEverywhere(provider) {
+  const linkedExpenses = uniqueArrayBy(expenses, expenseMergeKey).filter((expense) => providerMatchesExpense(provider, expense));
+  const expenseCount = linkedExpenses.length;
+  const message = expenseCount
+    ? `Se eliminará ${provider.name} de todo el sistema junto con ${expenseCount} pago${expenseCount === 1 ? "" : "s"}, sus facturas guardadas, proyecciones y alertas. Esta acción no se puede deshacer. ¿Continuar?`
+    : `Se eliminará ${provider.name} de proveedores, proyecciones, controles y alertas. Esta acción no se puede deshacer. ¿Continuar?`;
+  if (!confirm(message)) return false;
+
+  for (const expense of linkedExpenses) {
+    if (expense.hasAttachment) await deletePdfAttachment(expense.id);
+  }
+
+  const scenarioAliases = PROJECTION_SCENARIO_PROVIDERS
+    .filter((scenario) => providerMergeKey(scenario) === providerMergeKey(provider))
+    .map((scenario) => scenario.id);
+  const providerIds = [...new Set([provider.id, ...scenarioAliases].filter(Boolean))];
+  expenses = expenses.filter((expense) => !providerMatchesExpense(provider, expense));
+  projections = projections.filter((item) =>
+    item.providerId !== provider.id
+    && compactText(item.provider) !== compactText(provider.name)
+    && (!provider.employee || compactText(item.provider) !== compactText(provider.employee)));
+  projectionGrid = withoutProviderKeys(projectionGrid, providerIds);
+  projectionPaidGrid = withoutProviderKeys(projectionPaidGrid, providerIds);
+  noPaymentGrid = withoutProviderKeys(noPaymentGrid, providerIds);
+  dismissedAlerts = Object.fromEntries(Object.entries(dismissedAlerts).filter(([key]) =>
+    !providerIds.some((providerId) => key.includes(providerId))));
+  providers = providers.filter((item) => item.id !== provider.id && providerMergeKey(item) !== providerMergeKey(provider));
+  providerIds.forEach((providerId) => { deletedProviderIds[providerId] = true; });
+
+  if (editingProviderId === provider.id) clearProviderEditMode();
+  if (pendingProviderUpload?.providerId === provider.id) pendingProviderUpload = null;
+  saveExpenses();
+  saveProjections();
+  saveProjectionGrid();
+  saveProjectionPaidGrid();
+  saveNoPaymentGrid();
+  saveDismissedAlerts();
+  saveProviders();
+  saveDeletedProviderIds();
+  refreshProviderList();
+  renderAll();
+  return true;
+}
+
 function localDataPayload() {
   return {
     replaceExpenses: true,
@@ -432,12 +497,14 @@ function localDataPayload() {
     replaceProjectionGrid: true,
     replaceNoPaymentGrid: true,
     replaceDismissedAlerts: true,
+    replaceDeletedProviderIds: true,
     expenses: uniqueArrayBy(expenses, expenseMergeKey),
     projections: uniqueArrayBy(projections, projectionMergeKey),
     projectionGrid,
     projectionPaidGrid,
     noPaymentGrid,
     dismissedAlerts,
+    deletedProviderIds,
     providers: uniqueArrayBy(providers, providerMergeKey),
     budgets: currentBudgetPayload(),
   };
@@ -451,6 +518,7 @@ function localDataHasRecords() {
     || Object.keys(projectionPaidGrid).length
     || Object.keys(noPaymentGrid).length
     || Object.keys(dismissedAlerts).length
+    || Object.keys(deletedProviderIds).length
     || localStorage.getItem(PROVIDER_KEY)
     || localStorage.getItem(BUDGET_KEY)
   );
@@ -493,16 +561,19 @@ function applySharedData(data) {
   projectionPaidGrid = data.projectionPaidGrid && typeof data.projectionPaidGrid === "object" ? data.projectionPaidGrid : {};
   noPaymentGrid = data.noPaymentGrid && typeof data.noPaymentGrid === "object" ? data.noPaymentGrid : loadNoPaymentGrid();
   dismissedAlerts = data.dismissedAlerts && typeof data.dismissedAlerts === "object" ? data.dismissedAlerts : loadDismissedAlerts();
+  deletedProviderIds = data.deletedProviderIds && typeof data.deletedProviderIds === "object" ? data.deletedProviderIds : loadDeletedProviderIds();
   applyBudgetOverrides(data.budgets && typeof data.budgets === "object" ? data.budgets : loadBudgets());
-  providers = sharedProviders.length
+  providers = (sharedProviders.length
     ? uniqueArrayBy(sharedProviders, providerMergeKey).map(normalizeProviderDates)
-    : DEFAULT_PROVIDERS.map(normalizeProviderDates);
+    : DEFAULT_PROVIDERS.map(normalizeProviderDates))
+    .filter((provider) => !deletedProviderIds[provider.id]);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
   localStorage.setItem(PROJECTION_KEY, JSON.stringify(projections));
   localStorage.setItem(PROJECTION_GRID_KEY, JSON.stringify(projectionGrid));
   localStorage.setItem(PROJECTION_PAID_KEY, JSON.stringify(projectionPaidGrid));
   localStorage.setItem(NO_PAYMENT_KEY, JSON.stringify(noPaymentGrid));
   localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify(dismissedAlerts));
+  localStorage.setItem(DELETED_PROVIDERS_KEY, JSON.stringify(deletedProviderIds));
   localStorage.setItem(PROVIDER_KEY, JSON.stringify(providers));
   localStorage.setItem(BUDGET_KEY, JSON.stringify(currentBudgetPayload()));
 }
@@ -836,7 +907,7 @@ function projectionCellIsPaid(provider, month) {
 }
 
 function visibleProjectionProviders() {
-  const uniqueProviders = uniqueArrayBy(providers, providerMergeKey);
+  const uniqueProviders = uniqueArrayBy(providers, providerMergeKey).filter((provider) => !deletedProviderIds[provider.id]);
   const sortedProviders = [...uniqueProviders].sort((a, b) => {
     const statusScore = (b.status === "Vigente") - (a.status === "Vigente");
     return statusScore
@@ -844,7 +915,8 @@ function visibleProjectionProviders() {
       || String(a.name).localeCompare(String(b.name));
   });
   const providerKeys = new Set(sortedProviders.map(providerMergeKey));
-  const missingScenarios = PROJECTION_SCENARIO_PROVIDERS.filter((provider) => !providerKeys.has(providerMergeKey(provider)));
+  const missingScenarios = PROJECTION_SCENARIO_PROVIDERS.filter((provider) =>
+    !deletedProviderIds[provider.id] && !providerKeys.has(providerMergeKey(provider)));
   return [...sortedProviders, ...missingScenarios];
 }
 
@@ -1227,6 +1299,7 @@ function renderProviders() {
         <div class="row-actions">
           <button class="edit-btn" type="button" data-action="edit" data-id="${item.id}">Editar</button>
           <button class="delete-btn" type="button" data-action="toggle" data-id="${item.id}">${item.status === "Vigente" ? "No vigente" : "Vigente"}</button>
+          <button class="delete-btn" type="button" data-action="delete-provider" data-id="${item.id}">Eliminar</button>
         </div>
       </td>
     </tr>
@@ -1341,6 +1414,7 @@ function renderProviderControl() {
             <button class="edit-btn" type="button" data-action="register-payment" data-id="${row.provider.id}" data-month="${controlMonth}">${row.providerExpenses.some((expense) => Number(expense.month) === controlMonth) ? "Editar monto" : "Registrar monto"}</button>
             <button class="mini-btn" type="button" data-action="upload-invoice" data-id="${row.provider.id}" data-month="${controlMonth}">Subir factura</button>
             <button class="mini-btn" type="button" data-action="toggle-no-payment" data-id="${row.provider.id}" data-month="${controlMonth}">${row.noPaymentThisMonth ? "Esperar pago este mes" : "Sin pago este mes"}</button>
+            <button class="delete-btn" type="button" data-action="delete-provider" data-id="${row.provider.id}" data-month="${controlMonth}">Eliminar proveedor</button>
           </div>
         </td>
       </tr>
@@ -3178,7 +3252,7 @@ if (document.querySelector("#projectionForm")) {
   });
 }
 
-document.querySelector("#providerSections").addEventListener("click", (event) => {
+document.querySelector("#providerSections").addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   const provider = providers.find((item) => item.id === button.dataset.id);
@@ -3186,6 +3260,10 @@ document.querySelector("#providerSections").addEventListener("click", (event) =>
   if (button.dataset.action === "edit") {
     fillProviderForm(provider);
     document.querySelector("#proveedores").scrollIntoView({ behavior: "smooth" });
+    return;
+  }
+  if (button.dataset.action === "delete-provider") {
+    await deleteProviderEverywhere(provider);
     return;
   }
   providers = providers.map((item) => item.id === button.dataset.id
@@ -3202,6 +3280,11 @@ document.querySelector("#providerControlRows").addEventListener("click", (event)
   const provider = providers.find((item) => item.id === button.dataset.id);
   const month = Number(button.dataset.month);
   if (!provider || Number.isNaN(month)) return;
+
+  if (button.dataset.action === "delete-provider") {
+    deleteProviderEverywhere(provider);
+    return;
+  }
 
   if (button.dataset.action === "toggle-no-payment") {
     const key = noPaymentKey(provider.id, month);
