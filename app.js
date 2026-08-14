@@ -180,6 +180,7 @@ applyBudgetOverrides(loadBudgets());
 let sharedDataReady = false;
 let sharedDataTimer = null;
 let pendingProviderUpload = null;
+let pendingExpenseAttachmentId = null;
 let expenses = loadExpenses();
 let projections = loadProjections();
 let projectionGrid = loadProjectionGrid();
@@ -374,8 +375,8 @@ async function viewPdfAttachment(expenseId) {
 
 function pdfViewButton(expense) {
   return expense.hasAttachment
-    ? `<button class="mini-btn" type="button" data-action="view-pdf" data-id="${expense.id}">Ver PDF</button>`
-    : "";
+    ? `<button class="mini-btn" type="button" data-action="view-pdf" data-id="${expense.id}">Ver factura</button>`
+    : `<button class="mini-btn" type="button" data-action="attach-pdf" data-id="${expense.id}">Adjuntar factura</button>`;
 }
 
 function clearNoPaymentForExpense(expense) {
@@ -2970,6 +2971,13 @@ document.querySelector("#expenseSections").addEventListener("click", async (even
   if (!button) return;
   const expense = expenses.find((item) => item.id === button.dataset.id);
   if (!expense) return;
+  if (button.dataset.action === "attach-pdf") {
+    pendingExpenseAttachmentId = expense.id;
+    const fileInput = document.querySelector("#rowPdfAttachment");
+    fileInput.value = "";
+    fileInput.click();
+    return;
+  }
   if (button.dataset.action === "view-pdf") {
     await viewPdfAttachment(expense.id);
     return;
@@ -2984,6 +2992,26 @@ document.querySelector("#expenseSections").addEventListener("click", async (even
   if (editingExpenseId === button.dataset.id) clearExpenseEditMode();
   saveExpenses();
   renderAll();
+});
+
+document.querySelector("#rowPdfAttachment").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  const expense = expenses.find((item) => item.id === pendingExpenseAttachmentId);
+  if (!file || !expense) {
+    pendingExpenseAttachmentId = null;
+    return;
+  }
+  try {
+    expense.hasAttachment = await savePdfAttachment(expense.id, file);
+    expense.sourceFile = file.name;
+    saveExpenses();
+    renderAll();
+    alert("Factura guardada. Ahora puedes abrirla con el botón Ver factura.");
+  } catch {
+    alert("No se pudo guardar la factura en este navegador.");
+  }
+  pendingExpenseAttachmentId = null;
+  event.target.value = "";
 });
 
 if (document.querySelector("#projectionRows")) {
