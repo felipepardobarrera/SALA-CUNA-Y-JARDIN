@@ -86,6 +86,7 @@ const BUDGET_KEY = "control-presupuestario-presupuesto-base-v1";
 const COLLAPSE_KEY = "control-presupuestario-paneles-v1";
 const STATIC_DATA_VERSION_KEY = "control-presupuestario-datos-publicados-v1";
 const NO_PAYMENT_KEY = "control-presupuestario-sin-pago-mensual-v1";
+const EXPENSE_DISCLOSURE_KEY = "control-presupuestario-despliegue-pagos-v1";
 
 function readableText(value) {
   if (typeof value !== "string") return value;
@@ -597,6 +598,19 @@ function loadPanelState() {
 
 function savePanelState(state) {
   localStorage.setItem(COLLAPSE_KEY, JSON.stringify(state));
+}
+
+function loadExpenseDisclosureState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPENSE_DISCLOSURE_KEY));
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function disclosureIsOpen(state, key, fallback = false) {
+  return Object.prototype.hasOwnProperty.call(state, key) ? Boolean(state[key]) : fallback;
 }
 
 function dateDefaultsForProvider(provider) {
@@ -2085,6 +2099,7 @@ async function saveBulkDocuments() {
 
 function renderRows() {
   const search = document.querySelector("#searchBox").value.trim().toLowerCase();
+  const disclosureState = loadExpenseDisclosureState();
   const rows = expenses
     .filter((item) => {
       const text = `${item.docType} ${item.docNumber} ${item.vendor} ${item.notes} ${byInitiative(item.initiativeId)?.shortName}`.toLowerCase();
@@ -2537,6 +2552,7 @@ function renderRows() {
 
 function renderRows() {
   const search = document.querySelector("#searchBox").value.trim().toLowerCase();
+  const disclosureState = loadExpenseDisclosureState();
   const filtered = expenses
     .filter((item) => {
       const text = `${item.docType} ${item.docNumber} ${item.vendor} ${item.notes} ${byInitiative(item.initiativeId)?.shortName}`.toLowerCase();
@@ -2559,15 +2575,18 @@ function renderRows() {
       return map;
     }, new Map());
 
-    return [...groups.entries()].map(([vendor, items], index) => {
+    return [...groups.entries()].map(([vendor, items]) => {
       const total = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
       const paidMonths = [...new Set(items.map((item) => Number(item.month)))]
         .sort((a, b) => a - b)
         .map((month) => MONTHS[month].slice(0, 3))
         .join(", ");
       const last = [...items].sort((a, b) => Number(b.month) - Number(a.month) || String(b.date).localeCompare(String(a.date)))[0];
+      const initiativeId = items[0]?.initiativeId || "sin-iniciativa";
+      const disclosureKey = `provider:${initiativeId}:${compactText(vendor)}`;
+      const isOpen = openAll || disclosureIsOpen(disclosureState, disclosureKey, false);
       return `
-        <details class="expense-group" ${openAll || index < 3 ? "open" : ""}>
+        <details class="expense-group" data-disclosure-key="${disclosureKey}" ${isOpen ? "open" : ""}>
           <summary>
             <div>
               <strong>${vendor}</strong>
@@ -2619,8 +2638,10 @@ function renderRows() {
     const rows = filtered.filter((item) => item.initiativeId === initiative.id);
     const total = rows.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const providerCount = new Set(rows.map((item) => item.vendor || "Sin proveedor/persona")).size;
+    const disclosureKey = `initiative:${initiative.id}`;
+    const isOpen = disclosureIsOpen(disclosureState, disclosureKey, Boolean(rows.length));
     return `
-      <details class="expense-initiative-group" ${rows.length ? "open" : ""}>
+      <details class="expense-initiative-group" data-disclosure-key="${disclosureKey}" ${isOpen ? "open" : ""}>
         <summary>
           <div>
             <strong>${initiative.shortName}</strong>
@@ -3010,6 +3031,14 @@ document.querySelector("#expenseSections").addEventListener("click", async (even
   saveExpenses();
   renderAll();
 });
+
+document.querySelector("#expenseSections").addEventListener("toggle", (event) => {
+  const details = event.target.closest("details[data-disclosure-key]");
+  if (!details || document.querySelector("#searchBox").value.trim()) return;
+  const state = loadExpenseDisclosureState();
+  state[details.dataset.disclosureKey] = details.open;
+  localStorage.setItem(EXPENSE_DISCLOSURE_KEY, JSON.stringify(state));
+}, true);
 
 document.querySelector("#rowPdfAttachment").addEventListener("change", async (event) => {
   const file = event.target.files[0];
