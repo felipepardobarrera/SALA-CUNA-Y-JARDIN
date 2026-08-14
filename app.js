@@ -692,6 +692,37 @@ function compactText(value) {
   return normalizeText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isVtmProvider(provider) {
+  return normalizeText(readableText(provider?.name || "")).toLowerCase().split(/[^a-z0-9]+/).includes("vtm");
+}
+
+function vtmExpenseOwner(expense) {
+  const candidates = uniqueArrayBy(providers, providerMergeKey).filter(isVtmProvider);
+  const vendor = compactText(expense.vendor);
+  const notes = compactText(expense.notes);
+  const documentText = `${vendor}${notes}`;
+
+  const poOwner = candidates.find((candidate) => {
+    const po = compactText(candidate.po);
+    return po && (vendor.includes(po) || notes.includes(po));
+  });
+  if (poOwner) return poOwner;
+
+  const scoredPeople = candidates.map((candidate) => {
+    const employee = normalizeText(readableText(candidate.employee || "")).toLowerCase();
+    const employeeCompact = compactText(employee);
+    const words = [...new Set(employee.split(/[^a-z0-9]+/).filter((word) => word.length >= 4))];
+    const fullMatch = employeeCompact && documentText.includes(employeeCompact);
+    const matchedWords = words.filter((word) => documentText.includes(word));
+    return { candidate, score: fullMatch ? 100 + matchedWords.length : matchedWords.length };
+  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
+  if (scoredPeople.length && (scoredPeople.length === 1 || scoredPeople[0].score > scoredPeople[1].score)) {
+    return scoredPeople[0].candidate;
+  }
+
+  return candidates.find((candidate) => compactText(candidate.name) === vendor) || null;
+}
+
 function providerMatchesExpense(provider, expense) {
   const vendor = compactText(expense.vendor);
   const notes = compactText(expense.notes);
@@ -702,18 +733,9 @@ function providerMatchesExpense(provider, expense) {
   const providerWords = [...new Set(normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !ignoredWords.has(word)))];
   const expenseWords = new Set(normalizeText(readableText(expense.vendor)).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
   const sharedWords = providerWords.filter((word) => expenseWords.has(word));
-  const isVtmProvider = normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).includes("vtm");
-  if (isVtmProvider) {
-    const identityWords = [...new Set(normalizeText(readableText(`${provider.name} ${provider.employee || ""}`))
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((word) => word.length >= 4 && !ignoredWords.has(word)))];
-    return Boolean(
-      (name && vendor === name)
-      || (employee && (vendor.includes(employee) || notes.includes(employee)))
-      || (po && (vendor.includes(po) || notes.includes(po)))
-      || identityWords.some((word) => vendor.includes(word) || notes.includes(word))
-    );
+  if (isVtmProvider(provider)) {
+    const owner = vtmExpenseOwner(expense);
+    return Boolean(owner && providerMergeKey(owner) === providerMergeKey(provider));
   }
   return Boolean(
     (name && vendor.includes(name)) ||
