@@ -76,6 +76,7 @@ const PROJECTION_SCENARIO_PROVIDERS = [
   { id: "scenario-monto-directo-1", type: "MONTO DIRECTO SALA CUNA", name: "Monto directo sala cuna 1", employee: "Escenario futuro", startDate: "2026-01-01", endDate: "2026-12-31", status: "Vigente", email: "", f30: "", po: "", caseId: "", notes: "Proveedor por definir" },
   { id: "scenario-monto-directo-2", type: "MONTO DIRECTO SALA CUNA", name: "Monto directo sala cuna 2", employee: "Escenario futuro", startDate: "2026-01-01", endDate: "2026-12-31", status: "Vigente", email: "", f30: "", po: "", caseId: "", notes: "Proveedor por definir" },
 ];
+const RETIRED_SCENARIO_PROVIDER_IDS = new Set(PROJECTION_SCENARIO_PROVIDERS.map((provider) => provider.id));
 
 const STORAGE_KEY = "control-presupuestario-sala-cuna-v1";
 const PROJECTION_KEY = "control-presupuestario-proyecciones-v1";
@@ -429,9 +430,11 @@ function saveDismissedAlerts() {
 function loadDeletedProviderIds() {
   try {
     const saved = JSON.parse(localStorage.getItem(DELETED_PROVIDERS_KEY));
-    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    const deleted = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    RETIRED_SCENARIO_PROVIDER_IDS.forEach((providerId) => { deleted[providerId] = true; });
+    return deleted;
   } catch {
-    return {};
+    return Object.fromEntries([...RETIRED_SCENARIO_PROVIDER_IDS].map((providerId) => [providerId, true]));
   }
 }
 
@@ -932,10 +935,7 @@ function visibleProjectionProviders() {
       || providerInitiative(a).localeCompare(providerInitiative(b))
       || String(a.name).localeCompare(String(b.name));
   });
-  const providerKeys = new Set(sortedProviders.map(providerMergeKey));
-  const missingScenarios = PROJECTION_SCENARIO_PROVIDERS.filter((provider) =>
-    !deletedProviderIds[provider.id] && !providerKeys.has(providerMergeKey(provider)));
-  return [...sortedProviders, ...missingScenarios];
+  return sortedProviders;
 }
 
 function legacyProjectionTarget(item, itemIndex = 0) {
