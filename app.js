@@ -698,8 +698,8 @@ function providerMatchesExpense(provider, expense) {
   const name = compactText(provider.name);
   const employee = compactText(provider.employee);
   const po = compactText(provider.po);
-  const ignoredWords = new Set(["de", "del", "la", "el", "y", "ltda", "limitada", "spa", "sociedad", "corporacion", "corp", "educacional"]);
-  const providerWords = normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !ignoredWords.has(word));
+  const ignoredWords = new Set(["de", "del", "la", "el", "y", "ltda", "limitada", "spa", "sociedad", "corporacion", "corp", "educacional", "vtm", "jardin", "infantil", "sala", "cuna"]);
+  const providerWords = [...new Set(normalizeText(readableText(provider.name)).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2 && !ignoredWords.has(word)))];
   const expenseWords = new Set(normalizeText(readableText(expense.vendor)).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
   const sharedWords = providerWords.filter((word) => expenseWords.has(word));
   return Boolean(
@@ -864,7 +864,7 @@ function providerMonthIsWithinPayments(provider, month) {
 }
 
 function providerMonthPaid(provider, month) {
-  return expenses.some((expense) =>
+  return uniqueArrayBy(expenses, expenseMergeKey).some((expense) =>
     Number(expense.month) === month
     && expense.initiativeId === providerInitiative(provider)
     && providerMatchesExpense(provider, expense)
@@ -872,7 +872,7 @@ function providerMonthPaid(provider, month) {
 }
 
 function providerMonthPaidAmount(provider, month) {
-  return expenses
+  return uniqueArrayBy(expenses, expenseMergeKey)
     .filter((expense) =>
       Number(expense.month) === month
       && expense.initiativeId === providerInitiative(provider)
