@@ -71,6 +71,12 @@ async function writeSharedData(payload) {
         ...(current.projectionPaidGrid && typeof current.projectionPaidGrid === "object" ? current.projectionPaidGrid : {}),
         ...(payload.projectionPaidGrid && typeof payload.projectionPaidGrid === "object" ? payload.projectionPaidGrid : {}),
       },
+    noPaymentGrid: payload.replaceNoPaymentGrid
+      ? (payload.noPaymentGrid && typeof payload.noPaymentGrid === "object" ? payload.noPaymentGrid : {})
+      : {
+        ...(current.noPaymentGrid && typeof current.noPaymentGrid === "object" ? current.noPaymentGrid : {}),
+        ...(payload.noPaymentGrid && typeof payload.noPaymentGrid === "object" ? payload.noPaymentGrid : {}),
+      },
     providers: payload.replaceProviders
       ? (Array.isArray(payload.providers) ? payload.providers : [])
       : mergeArrayByKey(current.providers, payload.providers, providerKey),

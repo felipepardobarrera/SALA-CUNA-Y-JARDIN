@@ -841,6 +841,11 @@ td:last-child {
   color: var(--red);
 }
 
+.status-no-payment {
+  background: #e7eef5;
+  color: #35536c;
+}
+
 .rule-box {
   display: grid;
   grid-template-columns: minmax(220px, 1.2fr) minmax(160px, 0.7fr) minmax(160px, 0.7fr) auto;

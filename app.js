@@ -85,6 +85,7 @@ const PROVIDER_KEY = "control-presupuestario-proveedores-v1";
 const BUDGET_KEY = "control-presupuestario-presupuesto-base-v1";
 const COLLAPSE_KEY = "control-presupuestario-paneles-v1";
 const STATIC_DATA_VERSION_KEY = "control-presupuestario-datos-publicados-v1";
+const NO_PAYMENT_KEY = "control-presupuestario-sin-pago-mensual-v1";
 
 function readableText(value) {
   if (typeof value !== "string") return value;
@@ -164,7 +165,7 @@ cleanTextList(PROJECTION_SCENARIO_PROVIDERS);
 function resetLocalDataIfRequested() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("resetLocal") !== "1") return;
-  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY].forEach((key) => {
+  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY, NO_PAYMENT_KEY].forEach((key) => {
     localStorage.removeItem(key);
   });
   params.delete("resetLocal");
@@ -184,11 +185,13 @@ let projections = loadProjections();
 let projectionGrid = loadProjectionGrid();
 let projectionPaidGrid = loadProjectionPaidGrid();
 let providers = loadProviders();
+let noPaymentGrid = loadNoPaymentGrid();
 expenses = cleanTextList(expenses);
 projections = cleanTextList(projections);
 providers = cleanTextList(providers);
 let lastDocumentData = null;
 let bulkDocuments = [];
+const pendingDocumentFiles = new Map();
 let editingExpenseId = null;
 let editingProviderId = null;
 
@@ -286,6 +289,108 @@ function saveProjectionPaidGrid() {
   scheduleSharedDataSave();
 }
 
+function loadNoPaymentGrid() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NO_PAYMENT_KEY));
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveNoPaymentGrid() {
+  localStorage.setItem(NO_PAYMENT_KEY, JSON.stringify(noPaymentGrid));
+  scheduleSharedDataSave();
+}
+
+function noPaymentKey(providerId, month) {
+  return `${providerId}:${month}`;
+}
+
+function openAttachmentDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("control-presupuestario-documentos", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("pdfs")) request.result.createObjectStore("pdfs", { keyPath: "expenseId" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function savePdfAttachment(expenseId, file) {
+  if (!file) return false;
+  const database = await openAttachmentDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("pdfs", "readwrite");
+    transaction.objectStore("pdfs").put({ expenseId, name: file.name, type: file.type || "application/pdf", blob: file });
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+  return true;
+}
+
+async function getPdfAttachment(expenseId) {
+  const database = await openAttachmentDatabase();
+  const result = await new Promise((resolve, reject) => {
+    const request = database.transaction("pdfs", "readonly").objectStore("pdfs").get(expenseId);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return result;
+}
+
+async function deletePdfAttachment(expenseId) {
+  const database = await openAttachmentDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("pdfs", "readwrite");
+    transaction.objectStore("pdfs").delete(expenseId);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+async function viewPdfAttachment(expenseId) {
+  const viewer = window.open("", "_blank");
+  try {
+    const attachment = await getPdfAttachment(expenseId);
+    if (!attachment?.blob) {
+      if (viewer) viewer.close();
+      alert("El PDF no está guardado en este navegador. Vuelve a subirlo para poder visualizarlo.");
+      return;
+    }
+    const url = URL.createObjectURL(attachment.blob);
+    if (viewer) viewer.location.href = url;
+    else window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    if (viewer) viewer.close();
+    alert("No se pudo abrir el PDF guardado.");
+  }
+}
+
+function pdfViewButton(expense) {
+  return expense.hasAttachment
+    ? `<button class="mini-btn" type="button" data-action="view-pdf" data-id="${expense.id}">Ver PDF</button>`
+    : "";
+}
+
+function clearNoPaymentForExpense(expense) {
+  let changed = false;
+  providers.forEach((provider) => {
+    if (!providerMatchesExpense(provider, expense)) return;
+    const key = noPaymentKey(provider.id, Number(expense.month));
+    if (noPaymentGrid[key]) {
+      delete noPaymentGrid[key];
+      changed = true;
+    }
+  });
+  if (changed) saveNoPaymentGrid();
+}
+
 function loadProviders() {
   try {
     const saved = JSON.parse(localStorage.getItem(PROVIDER_KEY));
@@ -306,10 +411,12 @@ function localDataPayload() {
     replaceProjections: true,
     replaceProviders: true,
     replaceProjectionGrid: true,
+    replaceNoPaymentGrid: true,
     expenses: uniqueArrayBy(expenses, expenseMergeKey),
     projections: uniqueArrayBy(projections, projectionMergeKey),
     projectionGrid,
     projectionPaidGrid,
+    noPaymentGrid,
     providers: uniqueArrayBy(providers, providerMergeKey),
     budgets: currentBudgetPayload(),
   };
@@ -321,6 +428,7 @@ function localDataHasRecords() {
     || projections.length
     || Object.keys(projectionGrid).length
     || Object.keys(projectionPaidGrid).length
+    || Object.keys(noPaymentGrid).length
     || localStorage.getItem(PROVIDER_KEY)
     || localStorage.getItem(BUDGET_KEY)
   );
@@ -361,6 +469,7 @@ function applySharedData(data) {
   projections = uniqueArrayBy(cleanTextList(Array.isArray(data.projections) ? data.projections : []), projectionMergeKey);
   projectionGrid = data.projectionGrid && typeof data.projectionGrid === "object" ? data.projectionGrid : {};
   projectionPaidGrid = data.projectionPaidGrid && typeof data.projectionPaidGrid === "object" ? data.projectionPaidGrid : {};
+  noPaymentGrid = data.noPaymentGrid && typeof data.noPaymentGrid === "object" ? data.noPaymentGrid : loadNoPaymentGrid();
   applyBudgetOverrides(data.budgets && typeof data.budgets === "object" ? data.budgets : loadBudgets());
   providers = sharedProviders.length
     ? uniqueArrayBy(sharedProviders, providerMergeKey).map(normalizeProviderDates)
@@ -369,6 +478,7 @@ function applySharedData(data) {
   localStorage.setItem(PROJECTION_KEY, JSON.stringify(projections));
   localStorage.setItem(PROJECTION_GRID_KEY, JSON.stringify(projectionGrid));
   localStorage.setItem(PROJECTION_PAID_KEY, JSON.stringify(projectionPaidGrid));
+  localStorage.setItem(NO_PAYMENT_KEY, JSON.stringify(noPaymentGrid));
   localStorage.setItem(PROVIDER_KEY, JSON.stringify(providers));
   localStorage.setItem(BUDGET_KEY, JSON.stringify(currentBudgetPayload()));
 }
@@ -1041,28 +1151,31 @@ function expectedMonthsForProvider(provider, controlMonth) {
   return Array.from({ length: endMonth - startMonth + 1 }, (_, index) => startMonth + index);
 }
 
-function providerControlStatus(provider, providerExpenses, expectedMonths) {
+function providerControlStatus(provider, providerExpenses, expectedMonths, noPaymentThisMonth) {
   const paidMonths = new Set(providerExpenses.map((expense) => Number(expense.month)));
   const missing = expectedMonths.filter((month) => !paidMonths.has(month));
-  if (!providerExpenses.length) return { text: "Sin pagos", className: "status-duplicate", missing };
-  if (missing.length) return { text: "Pendiente", className: "status-review", missing };
-  return { text: "Al dÃ­a", className: "status-ready", missing };
+  if (!missing.length && noPaymentThisMonth) return { text: "Sin pago este mes", className: "status-no-payment", missing, hasAlert: false };
+  if (!providerExpenses.length) return { text: "Sin pagos", className: "status-duplicate", missing, hasAlert: true };
+  if (missing.length) return { text: "Pendiente", className: "status-review", missing, hasAlert: true };
+  return { text: "Al dÃ­a", className: "status-ready", missing, hasAlert: false };
 }
 
 function renderProviderControl() {
   const controlMonth = Number(document.querySelector("#providerControlMonth").value);
   const rows = providers.map((provider) => {
     const providerExpenses = expensesForProvider(provider);
-    const expectedMonths = expectedMonthsForProvider(provider, controlMonth);
-    const status = providerControlStatus(provider, providerExpenses, expectedMonths);
+    const noPaymentThisMonth = Boolean(noPaymentGrid[noPaymentKey(provider.id, controlMonth)]);
+    const expectedMonths = expectedMonthsForProvider(provider, controlMonth)
+      .filter((month) => !noPaymentGrid[noPaymentKey(provider.id, month)]);
+    const status = providerControlStatus(provider, providerExpenses, expectedMonths, noPaymentThisMonth);
     const paidMonths = [...new Set(providerExpenses.map((expense) => Number(expense.month)))]
       .sort((a, b) => a - b);
     const total = providerExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const lastExpense = [...providerExpenses].sort((a, b) => Number(b.month) - Number(a.month) || String(b.date).localeCompare(String(a.date)))[0];
-    return { provider, providerExpenses, expectedMonths, status, paidMonths, total, lastExpense };
+    return { provider, providerExpenses, expectedMonths, status, paidMonths, total, lastExpense, noPaymentThisMonth };
   });
 
-  const withAlert = rows.filter((row) => row.status.text !== "Al dÃ­a").length;
+  const withAlert = rows.filter((row) => row.status.hasAlert).length;
   const totalPaid = rows.reduce((sum, row) => sum + row.total, 0);
   const upToDate = rows.length - withAlert;
 
@@ -1093,12 +1206,13 @@ function renderProviderControl() {
         <td>${row.provider.type}<br><small>${row.provider.status}</small></td>
         <td>${money.format(row.total)}</td>
         <td>${row.paidMonths.length ? row.paidMonths.map((month) => MONTHS[month].slice(0, 3)).join(", ") : "Sin meses"}</td>
-        <td>${row.status.missing.length ? row.status.missing.map((month) => MONTHS[month].slice(0, 3)).join(", ") : "Sin pendientes"}</td>
+        <td>${row.status.missing.length ? row.status.missing.map((month) => MONTHS[month].slice(0, 3)).join(", ") : row.noPaymentThisMonth ? `Sin pago: ${MONTHS[controlMonth].slice(0, 3)}` : "Sin pendientes"}</td>
         <td>${row.lastExpense ? `${MONTHS[row.lastExpense.month]}<br><small>${row.lastExpense.docType} ${row.lastExpense.docNumber}</small>` : "Sin registro"}</td>
         <td>
           <div class="row-actions">
             <button class="edit-btn" type="button" data-action="register-payment" data-id="${row.provider.id}" data-month="${controlMonth}">${row.providerExpenses.some((expense) => Number(expense.month) === controlMonth) ? "Editar monto" : "Registrar monto"}</button>
             <button class="mini-btn" type="button" data-action="upload-invoice" data-id="${row.provider.id}" data-month="${controlMonth}">Subir factura</button>
+            <button class="mini-btn" type="button" data-action="toggle-no-payment" data-id="${row.provider.id}" data-month="${controlMonth}">${row.noPaymentThisMonth ? "Esperar pago este mes" : "Sin pago este mes"}</button>
           </div>
         </td>
       </tr>
@@ -1827,7 +1941,7 @@ function expenseFromForm(existing = {}) {
   };
 }
 
-function saveExpenseFromDocument(data) {
+async function saveExpenseFromDocument(data) {
   clearExpenseEditMode();
   const expense = {
     id: newId(),
@@ -1842,7 +1956,13 @@ function saveExpenseFromDocument(data) {
     sourceFile: data.sourceFile || "",
     sourceText: data.rawText || "",
   };
+  const attachment = pendingDocumentFiles.get(data.sourceFile || "");
+  if (attachment) {
+    expense.hasAttachment = await savePdfAttachment(expense.id, attachment);
+    pendingDocumentFiles.delete(data.sourceFile || "");
+  }
   expenses.push(expense);
+  clearNoPaymentForExpense(expense);
   saveExpenses();
   fillExpenseFormFromDocument(data);
   renderAll();
@@ -1912,14 +2032,14 @@ function renderBulkDocuments() {
     || `<tr><td colspan="9">Selecciona varias facturas o resoluciones PDF para analizarlas en lote.</td></tr>`;
 }
 
-function saveBulkDocuments() {
+async function saveBulkDocuments() {
   const valid = bulkDocuments.filter((data) => data.selected && documentStatus(data) === "Listo");
   if (!valid.length) {
     alert("No hay documentos seleccionados y vÃ¡lidos para guardar. Revisa duplicados, documentos incompletos o marca los check correspondientes.");
     return;
   }
-  valid.forEach((data) => {
-    expenses.push({
+  for (const data of valid) {
+    const expense = {
       id: newId(),
       initiativeId: data.initiativeId,
       month: Number(data.month),
@@ -1931,8 +2051,15 @@ function saveBulkDocuments() {
       notes: documentNotes(data),
       sourceFile: data.sourceFile || "",
       sourceText: data.rawText || "",
-    });
-  });
+    };
+    const attachment = pendingDocumentFiles.get(data.sourceFile || "");
+    if (attachment) {
+      expense.hasAttachment = await savePdfAttachment(expense.id, attachment);
+      pendingDocumentFiles.delete(data.sourceFile || "");
+    }
+    expenses.push(expense);
+    clearNoPaymentForExpense(expense);
+  }
   saveExpenses();
   bulkDocuments = bulkDocuments.filter((data) => !valid.some((saved) => saved.bulkId === data.bulkId));
   renderAll();
@@ -1960,6 +2087,7 @@ function renderRows() {
           <td>${money.format(item.amount)}</td>
           <td>
             <div class="row-actions">
+              ${pdfViewButton(item)}
               <button class="edit-btn" type="button" data-action="edit" data-id="${item.id}">Editar</button>
               <button class="delete-btn" type="button" data-action="delete" data-id="${item.id}">Eliminar</button>
             </div>
@@ -2376,6 +2504,7 @@ function renderRows() {
                   <td>${money.format(item.amount)}</td>
                   <td>
                     <div class="row-actions">
+                      ${pdfViewButton(item)}
                       <button class="edit-btn" type="button" data-action="edit" data-id="${item.id}">Editar</button>
                       <button class="delete-btn" type="button" data-action="delete" data-id="${item.id}">Eliminar</button>
                     </div>
@@ -2455,6 +2584,7 @@ function renderRows() {
                     <td>${money.format(item.amount)}</td>
                     <td>
                       <div class="row-actions">
+                        ${pdfViewButton(item)}
                         <button class="edit-btn" type="button" data-action="edit" data-id="${item.id}">Editar</button>
                         <button class="delete-btn" type="button" data-action="delete" data-id="${item.id}">Eliminar</button>
                       </div>
@@ -2585,6 +2715,7 @@ function backupData() {
     projections,
     projectionGrid,
     projectionPaidGrid,
+    noPaymentGrid,
     providers,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8;" });
@@ -2704,15 +2835,21 @@ async function restoreLatestBackupIfRequested() {
   alert(`RestauraciÃ³n lista: ${result.addedExpenses} gastos recuperados.`);
 }
 
-document.querySelector("#expenseForm").addEventListener("submit", (event) => {
+document.querySelector("#expenseForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  let savedExpense;
   if (editingExpenseId) {
     const current = expenses.find((item) => item.id === editingExpenseId);
-    expenses = expenses.map((item) => item.id === editingExpenseId ? expenseFromForm(current) : item);
+    savedExpense = expenseFromForm(current);
+    expenses = expenses.map((item) => item.id === editingExpenseId ? savedExpense : item);
   } else {
-    expenses.push(expenseFromForm());
+    savedExpense = expenseFromForm();
+    expenses.push(savedExpense);
   }
+  const attachment = document.querySelector("#expenseAttachment").files[0];
+  if (attachment) savedExpense.hasAttachment = await savePdfAttachment(savedExpense.id, attachment);
+  clearNoPaymentForExpense(savedExpense);
   saveExpenses();
   form.reset();
   clearExpenseEditMode();
@@ -2786,6 +2923,23 @@ document.querySelector("#providerControlRows").addEventListener("click", (event)
   const month = Number(button.dataset.month);
   if (!provider || Number.isNaN(month)) return;
 
+  if (button.dataset.action === "toggle-no-payment") {
+    const key = noPaymentKey(provider.id, month);
+    if (noPaymentGrid[key]) {
+      delete noPaymentGrid[key];
+    } else {
+      const existingPayment = expensesForProvider(provider).some((expense) => Number(expense.month) === month);
+      if (existingPayment) {
+        alert("Este proveedor ya tiene un pago registrado en el mes seleccionado.");
+        return;
+      }
+      noPaymentGrid[key] = true;
+    }
+    saveNoPaymentGrid();
+    renderAll();
+    return;
+  }
+
   if (button.dataset.action === "upload-invoice") {
     pendingProviderUpload = { providerId: provider.id, month };
     const fileInput = document.querySelector("#documentFile");
@@ -2811,16 +2965,21 @@ document.querySelector("#providerControlRows").addEventListener("click", (event)
   document.querySelector("#registro").scrollIntoView({ behavior: "smooth" });
 });
 
-document.querySelector("#expenseSections").addEventListener("click", (event) => {
+document.querySelector("#expenseSections").addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   const expense = expenses.find((item) => item.id === button.dataset.id);
   if (!expense) return;
+  if (button.dataset.action === "view-pdf") {
+    await viewPdfAttachment(expense.id);
+    return;
+  }
   if (button.dataset.action === "edit") {
     fillExpenseFormFromExpense(expense);
     document.querySelector("#registro").scrollIntoView({ behavior: "smooth" });
     return;
   }
+  if (expense.hasAttachment) await deletePdfAttachment(expense.id);
   expenses = expenses.filter((item) => item.id !== button.dataset.id);
   if (editingExpenseId === button.dataset.id) clearExpenseEditMode();
   saveExpenses();
@@ -2912,6 +3071,7 @@ document.querySelector("#applySuggestedAmount").addEventListener("click", () => 
 });
 async function analyzeDocumentInput() {
   const files = [...document.querySelector("#documentFile").files];
+  files.forEach((file) => pendingDocumentFiles.set(file.name, file));
   let text = document.querySelector("#documentText").value.trim();
   if (files.length > 1) {
     bulkDocuments = [];
@@ -3005,9 +3165,11 @@ document.querySelector("#saveDocumentExpense").addEventListener("click", async (
     alert("No se detectÃ³ monto. Revisa el texto o ingresa el monto manualmente antes de guardar.");
     return;
   }
-  saveExpenseFromDocument(data);
+  await saveExpenseFromDocument(data);
 });
-document.querySelector("#saveBulkDocuments").addEventListener("click", saveBulkDocuments);
+document.querySelector("#saveBulkDocuments").addEventListener("click", async () => {
+  await saveBulkDocuments();
+});
 document.querySelector("#importCsv").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
