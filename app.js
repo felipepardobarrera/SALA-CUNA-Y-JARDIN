@@ -445,6 +445,19 @@ function withoutProviderKeys(source, providerIds) {
     !providerIds.some((providerId) => key === providerId || key.startsWith(`${providerId}:`))));
 }
 
+function cleanOrphanedProviderData() {
+  const activeProviderIds = new Set([
+    ...providers.filter((provider) => !deletedProviderIds[provider.id]).map((provider) => provider.id),
+    ...PROJECTION_SCENARIO_PROVIDERS
+      .filter((provider) => !deletedProviderIds[provider.id])
+      .map((provider) => provider.id),
+  ]);
+  const keepActiveProviderKey = ([key]) => activeProviderIds.has(String(key).split(":")[0]);
+  projectionGrid = Object.fromEntries(Object.entries(projectionGrid || {}).filter(keepActiveProviderKey));
+  projectionPaidGrid = Object.fromEntries(Object.entries(projectionPaidGrid || {}).filter(keepActiveProviderKey));
+  noPaymentGrid = Object.fromEntries(Object.entries(noPaymentGrid || {}).filter(keepActiveProviderKey));
+}
+
 async function deleteProviderEverywhere(provider) {
   const linkedExpenses = uniqueArrayBy(expenses, expenseMergeKey).filter((expense) => providerMatchesExpense(provider, expense));
   const expenseCount = linkedExpenses.length;
@@ -473,6 +486,7 @@ async function deleteProviderEverywhere(provider) {
     !providerIds.some((providerId) => key.includes(providerId))));
   providers = providers.filter((item) => item.id !== provider.id && providerMergeKey(item) !== providerMergeKey(provider));
   providerIds.forEach((providerId) => { deletedProviderIds[providerId] = true; });
+  cleanOrphanedProviderData();
 
   if (editingProviderId === provider.id) clearProviderEditMode();
   if (pendingProviderUpload?.providerId === provider.id) pendingProviderUpload = null;
@@ -561,12 +575,16 @@ function applySharedData(data) {
   projectionPaidGrid = data.projectionPaidGrid && typeof data.projectionPaidGrid === "object" ? data.projectionPaidGrid : {};
   noPaymentGrid = data.noPaymentGrid && typeof data.noPaymentGrid === "object" ? data.noPaymentGrid : loadNoPaymentGrid();
   dismissedAlerts = data.dismissedAlerts && typeof data.dismissedAlerts === "object" ? data.dismissedAlerts : loadDismissedAlerts();
-  deletedProviderIds = data.deletedProviderIds && typeof data.deletedProviderIds === "object" ? data.deletedProviderIds : loadDeletedProviderIds();
+  deletedProviderIds = {
+    ...loadDeletedProviderIds(),
+    ...(data.deletedProviderIds && typeof data.deletedProviderIds === "object" ? data.deletedProviderIds : {}),
+  };
   applyBudgetOverrides(data.budgets && typeof data.budgets === "object" ? data.budgets : loadBudgets());
   providers = (sharedProviders.length
     ? uniqueArrayBy(sharedProviders, providerMergeKey).map(normalizeProviderDates)
     : DEFAULT_PROVIDERS.map(normalizeProviderDates))
     .filter((provider) => !deletedProviderIds[provider.id]);
+  cleanOrphanedProviderData();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
   localStorage.setItem(PROJECTION_KEY, JSON.stringify(projections));
   localStorage.setItem(PROJECTION_GRID_KEY, JSON.stringify(projectionGrid));
