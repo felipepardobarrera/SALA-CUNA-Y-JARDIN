@@ -933,6 +933,20 @@ function setupCollapsiblePanels() {
   });
 }
 
+function expandPanel(panelId) {
+  const panel = document.querySelector(`#${panelId}`);
+  if (!panel) return;
+  panel.classList.remove("is-collapsed");
+  const button = panel.querySelector(":scope > .section-heading .collapse-toggle");
+  if (button) {
+    button.textContent = "Ocultar";
+    button.setAttribute("aria-expanded", "true");
+  }
+  const state = loadPanelState();
+  state[panelId] = false;
+  savePanelState(state);
+}
+
 function setProviderFormMode() {
   const isEditing = Boolean(editingProviderId);
   const submit = document.querySelector("#providerSubmit");
@@ -2952,6 +2966,7 @@ document.querySelector("#providerControlRows").addEventListener("click", (event)
   }
 
   const existing = expensesForProvider(provider).find((expense) => Number(expense.month) === month);
+  expandPanel("registro");
   if (existing) {
     fillExpenseFormFromExpense(existing);
   } else {
@@ -2984,6 +2999,7 @@ document.querySelector("#expenseSections").addEventListener("click", async (even
     return;
   }
   if (button.dataset.action === "edit") {
+    expandPanel("registro");
     fillExpenseFormFromExpense(expense);
     document.querySelector("#registro").scrollIntoView({ behavior: "smooth" });
     return;
