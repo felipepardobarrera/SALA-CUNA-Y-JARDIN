@@ -807,6 +807,50 @@ function visibleProjectionProviders() {
   return [...sortedProviders, ...missingScenarios];
 }
 
+function legacyProjectionTarget(item, itemIndex = 0) {
+  const directProvider = projectionProvider(item);
+  if (directProvider) return directProvider;
+  const wanted = compactText(`${item.provider || ""} ${item.scenario || ""}`);
+  const candidates = visibleProjectionProviders().filter((provider) => providerInitiative(provider) === item.initiativeId);
+  const textMatch = candidates.find((provider) => {
+    const providerText = compactText(`${provider.name || ""} ${provider.employee || ""}`);
+    return wanted && providerText && (providerText.includes(wanted) || wanted.includes(providerText));
+  });
+  if (textMatch) return textMatch;
+  const scenarios = PROJECTION_SCENARIO_PROVIDERS.filter((provider) => providerInitiative(provider) === item.initiativeId);
+  return scenarios[itemIndex % Math.max(1, scenarios.length)] || candidates[0] || null;
+}
+
+function migrateLegacyProjectionsToGrid() {
+  if (!projections.length) return 0;
+  let migratedCells = 0;
+  projections.forEach((item, itemIndex) => {
+    const provider = legacyProjectionTarget(item, itemIndex);
+    if (!provider) return;
+    const amount = Number(item.monthlyAmount || 0);
+    projectionActiveMonths(item).forEach((month) => {
+      if (!providerMonthIsWithinPayments(provider, month) || providerMonthPaid(provider, month)) return;
+      const key = projectionGridKey(provider.id, month);
+      projectionGrid[key] = Number(projectionGrid[key] || 0) + amount;
+      delete projectionPaidGrid[key];
+      migratedCells += 1;
+    });
+    const extra = Number(item.extraCount || 0) * Number(item.extraAmount || 0);
+    const extraMonth = Number(item.endMonth);
+    if (extra > 0 && providerMonthIsWithinPayments(provider, extraMonth) && !providerMonthPaid(provider, extraMonth)) {
+      const key = projectionGridKey(provider.id, extraMonth);
+      projectionGrid[key] = Number(projectionGrid[key] || 0) + extra;
+      delete projectionPaidGrid[key];
+      migratedCells += 1;
+    }
+  });
+  projections = [];
+  saveProjections();
+  saveProjectionGrid();
+  saveProjectionPaidGrid();
+  return migratedCells;
+}
+
 function providerInitiative(provider) {
   return initiativeFromProviderType(provider.type);
 }
@@ -3017,6 +3061,7 @@ function importCsvRows(rows) {
 
   saveExpenses();
   saveProjections();
+  migrateLegacyProjectionsToGrid();
   renderAll();
   return { addedExpenses, addedProjections };
 }
@@ -3527,6 +3572,7 @@ document.querySelector("#resetDemo").addEventListener("click", () => {
 async function initializeApp() {
   await loadSharedData();
   sharedDataReady = true;
+  migrateLegacyProjectionsToGrid();
   fillSelectors();
   renderProviderF30Fields();
   setupCollapsiblePanels();
