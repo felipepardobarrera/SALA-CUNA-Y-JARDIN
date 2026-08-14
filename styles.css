@@ -928,9 +928,43 @@ td:last-child {
 
 .alert-item {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 4px;
   padding: 10px 12px;
   border-radius: 8px;
+}
+
+.alert-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.alert-dismiss-btn {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  padding: 7px 10px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.alert-dismiss-btn:hover {
+  background: #fff;
+}
+
+@media (max-width: 640px) {
+  .alert-item {
+    grid-template-columns: 1fr;
+  }
+
+  .alert-dismiss-btn {
+    justify-self: start;
+  }
 }
 
 .alert-item.warn {

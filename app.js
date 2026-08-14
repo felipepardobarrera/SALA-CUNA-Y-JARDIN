@@ -87,6 +87,7 @@ const COLLAPSE_KEY = "control-presupuestario-paneles-v1";
 const STATIC_DATA_VERSION_KEY = "control-presupuestario-datos-publicados-v1";
 const NO_PAYMENT_KEY = "control-presupuestario-sin-pago-mensual-v1";
 const EXPENSE_DISCLOSURE_KEY = "control-presupuestario-despliegue-pagos-v1";
+const DISMISSED_ALERTS_KEY = "control-presupuestario-alertas-ocultas-v1";
 
 function readableText(value) {
   if (typeof value !== "string") return value;
@@ -166,7 +167,7 @@ cleanTextList(PROJECTION_SCENARIO_PROVIDERS);
 function resetLocalDataIfRequested() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("resetLocal") !== "1") return;
-  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY, NO_PAYMENT_KEY].forEach((key) => {
+  [STORAGE_KEY, PROJECTION_KEY, PROJECTION_GRID_KEY, PROJECTION_PAID_KEY, PROVIDER_KEY, BUDGET_KEY, NO_PAYMENT_KEY, DISMISSED_ALERTS_KEY].forEach((key) => {
     localStorage.removeItem(key);
   });
   params.delete("resetLocal");
@@ -188,6 +189,7 @@ let projectionGrid = loadProjectionGrid();
 let projectionPaidGrid = loadProjectionPaidGrid();
 let providers = loadProviders();
 let noPaymentGrid = loadNoPaymentGrid();
+let dismissedAlerts = loadDismissedAlerts();
 expenses = cleanTextList(expenses);
 projections = cleanTextList(projections);
 providers = cleanTextList(providers);
@@ -408,6 +410,20 @@ function saveProviders() {
   scheduleSharedDataSave();
 }
 
+function loadDismissedAlerts() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DISMISSED_ALERTS_KEY));
+    return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDismissedAlerts() {
+  localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify(dismissedAlerts));
+  scheduleSharedDataSave();
+}
+
 function localDataPayload() {
   return {
     replaceExpenses: true,
@@ -415,11 +431,13 @@ function localDataPayload() {
     replaceProviders: true,
     replaceProjectionGrid: true,
     replaceNoPaymentGrid: true,
+    replaceDismissedAlerts: true,
     expenses: uniqueArrayBy(expenses, expenseMergeKey),
     projections: uniqueArrayBy(projections, projectionMergeKey),
     projectionGrid,
     projectionPaidGrid,
     noPaymentGrid,
+    dismissedAlerts,
     providers: uniqueArrayBy(providers, providerMergeKey),
     budgets: currentBudgetPayload(),
   };
@@ -432,6 +450,7 @@ function localDataHasRecords() {
     || Object.keys(projectionGrid).length
     || Object.keys(projectionPaidGrid).length
     || Object.keys(noPaymentGrid).length
+    || Object.keys(dismissedAlerts).length
     || localStorage.getItem(PROVIDER_KEY)
     || localStorage.getItem(BUDGET_KEY)
   );
@@ -473,6 +492,7 @@ function applySharedData(data) {
   projectionGrid = data.projectionGrid && typeof data.projectionGrid === "object" ? data.projectionGrid : {};
   projectionPaidGrid = data.projectionPaidGrid && typeof data.projectionPaidGrid === "object" ? data.projectionPaidGrid : {};
   noPaymentGrid = data.noPaymentGrid && typeof data.noPaymentGrid === "object" ? data.noPaymentGrid : loadNoPaymentGrid();
+  dismissedAlerts = data.dismissedAlerts && typeof data.dismissedAlerts === "object" ? data.dismissedAlerts : loadDismissedAlerts();
   applyBudgetOverrides(data.budgets && typeof data.budgets === "object" ? data.budgets : loadBudgets());
   providers = sharedProviders.length
     ? uniqueArrayBy(sharedProviders, providerMergeKey).map(normalizeProviderDates)
@@ -482,6 +502,7 @@ function applySharedData(data) {
   localStorage.setItem(PROJECTION_GRID_KEY, JSON.stringify(projectionGrid));
   localStorage.setItem(PROJECTION_PAID_KEY, JSON.stringify(projectionPaidGrid));
   localStorage.setItem(NO_PAYMENT_KEY, JSON.stringify(noPaymentGrid));
+  localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify(dismissedAlerts));
   localStorage.setItem(PROVIDER_KEY, JSON.stringify(providers));
   localStorage.setItem(BUDGET_KEY, JSON.stringify(currentBudgetPayload()));
 }
@@ -2404,15 +2425,16 @@ function executiveAlerts() {
     const forecast = projectedTotal(item.id);
     const close = spent + forecast;
     if (budget && close > budget) {
-      alerts.push({ level: "risk", title: item.shortName, text: `Cierre estimado supera presupuesto en ${money.format(close - budget)}.` });
+      alerts.push({ id: `budget:${item.id}:risk`, level: "risk", title: item.shortName, text: `Cierre estimado supera presupuesto en ${money.format(close - budget)}.` });
     } else if (budget && close / budget >= 0.9) {
-      alerts.push({ level: "warn", title: item.shortName, text: `EjecuciÃ³n estimada en ${Math.round((close / budget) * 100)}%. Revisar margen.` });
+      alerts.push({ id: `budget:${item.id}:warn`, level: "warn", title: item.shortName, text: `EjecuciÃ³n estimada en ${Math.round((close / budget) * 100)}%. Revisar margen.` });
     }
   });
 
   providerReportRows().forEach((row) => {
     if (row.missing.length) {
       alerts.push({
+        id: `provider-missing:${row.provider.id}:${row.missing.join("-")}`,
         level: "warn",
         title: row.provider.name,
         text: `Meses pendientes: ${row.missing.map((month) => MONTHS[month].slice(0, 3)).join(", ")}.`,
@@ -2423,11 +2445,11 @@ function executiveAlerts() {
       const today = new Date();
       const days = Math.ceil((end - today) / 86400000);
       if (days >= 0 && days <= 60) {
-        alerts.push({ level: "warn", title: row.provider.name, text: `Derecho termina pronto: ${row.provider.endDate}.` });
+        alerts.push({ id: `provider-end:${row.provider.id}:${row.provider.endDate}`, level: "warn", title: row.provider.name, text: `Derecho termina pronto: ${row.provider.endDate}.` });
       }
     }
     if (row.provider.requiresF30 === "SÃƒÂ­" && !String(row.provider.f30 || "").trim()) {
-      alerts.push({ level: "risk", title: row.provider.name, text: "Requiere F30-1, pero falta indicar quÃƒÂ© pedir." });
+      alerts.push({ id: `provider-f30:${row.provider.id}`, level: "risk", title: row.provider.name, text: "Requiere F30-1, pero falta indicar quÃƒÂ© pedir." });
     }
   });
 
@@ -2435,12 +2457,12 @@ function executiveAlerts() {
   expenses.forEach((expense) => {
     const key = `${expense.docType}|${expense.docNumber}|${expense.vendor}|${expense.month}|${expense.amount}`.toLowerCase();
     if (duplicateKeys.has(key)) {
-      alerts.push({ level: "risk", title: "Posible duplicado", text: `${expense.docType} ${expense.docNumber} - ${expense.vendor}.` });
+      alerts.push({ id: `duplicate:${expense.id || compactText(key)}`, level: "risk", title: "Posible duplicado", text: `${expense.docType} ${expense.docNumber} - ${expense.vendor}.` });
     }
     duplicateKeys.add(key);
   });
 
-  return alerts.slice(0, 12);
+  return alerts.filter((alert) => !dismissedAlerts[alert.id]).slice(0, 12);
 }
 
 function executiveReportText() {
@@ -2498,8 +2520,12 @@ function renderExecutiveReport() {
   }).join("");
 
   const alerts = executiveAlerts();
+  const dismissedCount = Object.keys(dismissedAlerts).length;
+  const restoreButton = document.querySelector("#restoreDismissedAlerts");
+  restoreButton.hidden = dismissedCount === 0;
+  restoreButton.textContent = `Restaurar ocultas (${dismissedCount})`;
   document.querySelector("#executiveAlerts").innerHTML = alerts.length
-    ? alerts.map((alert) => `<article class="alert-item ${alert.level}"><strong>${alert.title}</strong><span>${alert.text}</span></article>`).join("")
+    ? alerts.map((alert) => `<article class="alert-item ${alert.level}"><div class="alert-copy"><strong>${alert.title}</strong><span>${alert.text}</span></div><button class="alert-dismiss-btn" type="button" data-alert-id="${encodeURIComponent(alert.id)}">No es alerta</button></article>`).join("")
     : `<article class="alert-item ok"><strong>Sin alertas</strong><span>No hay riesgos relevantes con la informaciÃƒÂ³n cargada.</span></article>`;
 
   const select = document.querySelector("#providerReportSelect");
@@ -3362,6 +3388,21 @@ document.querySelector("#syncSharedData").addEventListener("click", async () => 
   alert("Datos sincronizados con el archivo central. Tus compañeros deben recargar con Ctrl + F5.");
 });
 document.querySelector("#backupData").addEventListener("click", backupData);
+document.querySelector("#executiveAlerts").addEventListener("click", (event) => {
+  const button = event.target.closest(".alert-dismiss-btn");
+  if (!button) return;
+  const alertId = decodeURIComponent(button.dataset.alertId || "");
+  if (!alertId) return;
+  dismissedAlerts[alertId] = new Date().toISOString();
+  saveDismissedAlerts();
+  renderAll();
+});
+document.querySelector("#restoreDismissedAlerts").addEventListener("click", () => {
+  if (!Object.keys(dismissedAlerts).length) return;
+  dismissedAlerts = {};
+  saveDismissedAlerts();
+  renderAll();
+});
 document.querySelector("#clearProjectionGrid").addEventListener("click", () => {
   if (!Object.keys(projectionGrid).length || confirm("Se eliminarÃ¡n todas las estimaciones futuras escritas en la matriz.")) {
     projectionGrid = {};
