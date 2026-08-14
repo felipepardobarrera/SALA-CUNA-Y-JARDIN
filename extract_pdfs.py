@@ -2,15 +2,23 @@ import base64
 import json
 import sys
 
-from pypdf import PdfReader
-
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 def extract_text(item):
     raw = base64.b64decode(item["data"])
     from io import BytesIO
 
-    reader = PdfReader(BytesIO(raw))
-    text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    if pdfplumber is not None:
+        with pdfplumber.open(BytesIO(raw)) as pdf:
+            text = "\n".join((page.extract_text() or "") for page in pdf.pages)
+    else:
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(raw))
+        text = "\n".join((page.extract_text() or "") for page in reader.pages)
     return {"name": item["name"], "text": text}
 
 

@@ -1598,7 +1598,8 @@ function documentNumberFromText(text, isMemo) {
     return extractByRegex(text, /MEMOR[ÃA]NDUM\s*(?:N[Â°Âºo.]*)?\s*([0-9]+\s*\/\s*[0-9]{4})/i)
       || extractByRegex(text, /ID\s*DOC\s*:?\s*([0-9]+)/i);
   }
-  return extractByRegex(text, /FACTURA[\s\S]{0,240}?(?:N[Â°Âºï¿½]?\s*|N\s+)([0-9]{3,})\s*S\.?\s*I\.?\s*I/i)
+  return extractByRegex(text, /FACTURA[\s\S]{0,320}?(?:N\s*[º°.o]?|NRO\.?)\s*([0-9]{3,})\s*S\.?\s*I\.?\s*I/i)
+    || extractByRegex(text, /FACTURA[\s\S]{0,320}?(?:N\s*[º°.o]?|NRO\.?)\s*([0-9]{3,})/i)
     || extractByRegex(text, /FACTURA[\s\S]{0,180}?ELECTR\S{0,4}NICA\s*(?:N[Â°Âºï¿½]?\s*|N\s+)([0-9]{3,})/i)
     || extractByRegex(text, /ELECTR\S{0,4}NICA\s*(?:N[Â°Âºï¿½]?\s*|N\s+)([0-9]{3,})/i)
     || extractByRegex(text, /(?:Folio|NRO\.?)\s*:?\s*([0-9]{3,})/i);
@@ -1611,21 +1612,24 @@ function analyzeText(text, sourceFile = "") {
   const isMemo = normalized.includes("memorandum") || normalized.includes("modalidad excepcional");
   const docType = isMemo ? "ResoluciÃ³n" : "Factura";
   const folio = documentNumberFromText(clean, isMemo);
+  const po = extractByRegex(clean, /Orden De Compra\s+([0-9A-Z\-]+)/i)
+    || extractByRegex(clean, /ORDEN DE COMPRA\s+([0-9A-Z\-]+)/i);
   const provider = isMemo
     ? "Pago excepcional sala cuna"
-    : providerFromText(clean)
+    : providerByPo(po)?.name
+      || providerFromText(clean)
       || extractByRegex(clean, /(?:Observaciones\s+)?(.+?)\s+(?:ENSENANZA|JARDIN INFANTIL|JARDÃN INFANTIL|SALA CUNA|R\.?U\.?T\.?)/i)
       || rawLines.find((line) => !/^observaciones$/i.test(line))
       || clean.split(/R\.U\.T\./i)[0].trim();
   const rut = extractByRegex(clean, /R\.?U\.?T\.?:?\s*([0-9.\-Kk]+)/i);
-  const po = extractByRegex(clean, /Orden De Compra\s+([0-9A-Z\-]+)/i)
-    || extractByRegex(clean, /ORDEN DE COMPRA\s+([0-9A-Z\-]+)/i);
-  const employee = extractByRegex(clean, /FUNC\.?\s*([A-ZÃÃ‰ÃÃ“ÃšÃ‘ ]+?)(?=\s+Monto|\s+\$|$)/i)
-    || extractByRegex(clean, /HIJO\/A DE\s+([A-ZÃÃ‰ÃÃ“ÃšÃ‘ ]+?)(?=\s+Monto|\s+\$|$)/i);
+  const employee = extractByRegex(clean, /FUNC\.?\s*([A-ZÁÉÍÓÚÑ ]+?)(?=\s+Observaciones|\s+Montos Totales|\s+Monto|\s+\$|$)/i)
+    || extractByRegex(clean, /HIJO\/A DE\s+([A-ZÁÉÍÓÚÑ ]+?)(?=\s+Observaciones|\s+Montos Totales|\s+Monto|\s+\$|$)/i);
   const date = extractByRegex(clean, /Fecha Emis\.?\s*:?\s*([0-9]{1,2}\s+[A-ZÃÃ‰ÃÃ“ÃšÃ‘]+\s+[0-9]{4})/i) || extractByRegex(clean, /Fecha:\s*SANTIAGO,\s*([^\.]+)/i);
-  const description = extractByRegex(clean, /(MENSUALIDAD[^$]+?)(?:[0-9]{2,3}\.?[0-9]{3}|Observaciones|Montos Totales)/i);
-  const serviceMonthText = extractByRegex(clean, /MENSUALIDAD\s+([A-ZÃÃ‰ÃÃ“ÃšÃ‘]+)/i);
-  const serviceMonth = monthIndexFromText(`${serviceMonthText} ${description}`);
+  const monthlyBlock = clean.match(/MENSUALIDAD[\s\S]{0,280}/i)?.[0] || "";
+  const description = monthlyBlock.split(/Observaciones|Montos Totales/i)[0].trim();
+  const chargedMonthText = (clean.match(/\bmes(?:\s+[0-9.]+){0,3}\s+(?:de\s+)?(?:enero|enerio|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i)?.[0] || "")
+    .replace(/enerio/i, "enero");
+  const serviceMonth = monthIndexFromText(`${monthlyBlock} ${chargedMonthText}`);
   const memoMonth = monthIndexFromText(clean.match(/mes\s+[a-zÃ¡Ã©Ã­Ã³ÃºÃ±]+/i)?.[0] || "");
   const issueMonth = monthIndexFromText(date);
   const month = serviceMonth >= 0 ? serviceMonth : memoMonth >= 0 ? memoMonth : issueMonth;
@@ -1740,6 +1744,13 @@ function analyzeDocumentEntries(text, sourceFile = "") {
 }
 
 async function extractPdfText(file) {
+  try {
+    const text = await extractPdfTextWithPdfJs(file);
+    if (text.trim()) return text.replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
+  } catch (error) {
+    console.warn("No se pudo leer con PDF.js; se usará el lector alternativo.", error);
+  }
+
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const latin = new TextDecoder("latin1").decode(bytes);
@@ -1776,6 +1787,31 @@ async function extractPdfText(file) {
     .map((match) => decodePdfHexText(match[1], true))
     .join(" ");
   return `${actualText} ${literalText} ${arrayText} ${hexText}`.replace(/\\([()\\])/g, "$1").replace(/\s+/g, " ").trim();
+}
+
+let pdfJsModulePromise = null;
+
+async function extractPdfTextWithPdfJs(file) {
+  if (!pdfJsModulePromise) {
+    const moduleUrl = new URL("vendor/pdf.mjs", window.location.href).href;
+    pdfJsModulePromise = import(moduleUrl);
+  }
+  const pdfjsLib = await pdfJsModulePromise;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("vendor/pdf.worker.mjs", window.location.href).href;
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    let pageText = "";
+    content.items.forEach((item) => {
+      pageText += `${item.str || ""}${item.hasEOL ? "\n" : " "}`;
+    });
+    pages.push(pageText.trim());
+  }
+
+  return pages.join("\n");
 }
 
 function fileToBase64(file) {
