@@ -2189,6 +2189,21 @@ function renderProjectionRows() {
 function renderProjectionGrid() {
   const container = document.querySelector("#projectionGridSections");
   if (!container) return;
+  const previousSections = [...container.querySelectorAll(".projection-grid-section")];
+  const openInitiatives = new Set(previousSections.filter((section) => section.open).map((section) => section.dataset.initiativeId));
+  const horizontalPositions = new Map(previousSections.map((section) => [
+    section.dataset.initiativeId,
+    section.querySelector(".projection-grid-wrap")?.scrollLeft || 0,
+  ]));
+  const activeElement = document.activeElement;
+  const activeCell = activeElement?.matches?.(".projection-month-input, .projection-paid-check")
+    ? {
+        className: activeElement.classList.contains("projection-month-input") ? "projection-month-input" : "projection-paid-check",
+        providerId: activeElement.dataset.providerId,
+        month: activeElement.dataset.month,
+      }
+    : null;
+  const pagePosition = { left: window.scrollX, top: window.scrollY };
 
   const renderRows = (projectionProviders) => projectionProviders.map((provider) => {
     const initiative = byInitiative(providerInitiative(provider));
@@ -2235,7 +2250,7 @@ function renderProjectionGrid() {
   });
 
   container.innerHTML = groups.map(({ initiative, providers, total }, index) => `
-    <details class="projection-grid-section" ${index === 0 ? "open" : ""}>
+    <details class="projection-grid-section" data-initiative-id="${initiative.id}" ${previousSections.length ? (openInitiatives.has(initiative.id) ? "open" : "") : (index === 0 ? "open" : "")}>
       <summary>
         <span>
           <strong>${initiative.shortName}</strong>
@@ -2257,6 +2272,17 @@ function renderProjectionGrid() {
       </div>
     </details>
   `).join("");
+
+  [...container.querySelectorAll(".projection-grid-section")].forEach((section) => {
+    const wrap = section.querySelector(".projection-grid-wrap");
+    if (wrap) wrap.scrollLeft = horizontalPositions.get(section.dataset.initiativeId) || 0;
+  });
+  if (activeCell) {
+    const replacement = [...container.querySelectorAll(`.${activeCell.className}`)].find((element) =>
+      element.dataset.providerId === activeCell.providerId && element.dataset.month === activeCell.month);
+    replacement?.focus({ preventScroll: true });
+  }
+  requestAnimationFrame(() => window.scrollTo({ ...pagePosition, behavior: "instant" }));
 }
 
 function renderProjectionSummary() {
